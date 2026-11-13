@@ -20,8 +20,8 @@ constexpr int RainBackupIcon = 101;
 constexpr int HeaderLogoSize = 64;
 enum Id {
     BackupPage = 100, RestorePage, ScanNow, ScanFolder, AddFolder, AddFile, Change, Remove, ScheduleButton,
-    SelectAll, ClearAll, Run, Open, Original, NewLocation, UseDetected, Details, ZipList, TreeId, Destinations,
-    EditDestination, ScheduleFolder, Frequency, Time, Copies, SaveTask, RemoveTask, RunTask, CloseDialog,
+    SelectAll, ClearAll, Run, Open, Original, NewLocation, Details, ZipList, TreeId, Destinations,
+    ScheduleFolder, Frequency, Time, Copies, SaveTask, RemoveTask, RunTask, CloseDialog,
     BrowseBackup, BackupPath, CancelTransfer, DeleteBackup, ShowLog, EmptyLog
 };
 
@@ -172,7 +172,7 @@ struct App {
     std::vector<Source> sources;
     std::vector<fs::path> ignored;
     OpenZip opened;
-    fs::path currentZip, lastFolder;
+    fs::path currentZip, lastFolder, restoreFolder;
     std::vector<fs::path> zips, targets;
     std::map<int, HWND> buttons;
     std::map<Node*, HTREEITEM> items;
@@ -297,7 +297,7 @@ struct App {
         progressBar = Control(PROGRESS_CLASSW, L"", PBS_SMOOTH);
         percentLabel = Control(L"STATIC", L"", SS_RIGHT | SS_NOPREFIX);
         SendMessageW(progressBar, PBM_SETRANGE32, 0, 100);
-        mode = Control(L"STATIC", L"", SS_NOPREFIX);
+        mode = Control(L"STATIC", L"", SS_NOPREFIX | SS_PATHELLIPSIS);
         backupPathLabel = Control(L"STATIC", L"Backup destination", SS_NOPREFIX);
         lastFolder = LoadBackupFolder();
         if (lastFolder.empty()) lastFolder = KnownFolder(FOLDERID_Documents);
@@ -307,7 +307,7 @@ struct App {
         tree = Control(WC_TREEVIEWW, L"", WS_TABSTOP | TVS_HASBUTTONS | TVS_HASLINES | TVS_LINESATROOT |
             TVS_SHOWSELALWAYS | TVS_DISABLEDRAGDROP | TVS_INFOTIP, TreeId);
         TreeView_SetExtendedStyle(tree, TVS_EX_DOUBLEBUFFER, TVS_EX_DOUBLEBUFFER);
-        destinations = Control(WC_LISTVIEWW, L"", WS_TABSTOP | LVS_REPORT | LVS_SINGLESEL | LVS_SHOWSELALWAYS, Destinations);
+        destinations = Control(WC_LISTVIEWW, L"", LVS_REPORT | LVS_SINGLESEL, Destinations);
         ListView_SetExtendedListViewStyle(destinations, LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER | LVS_EX_INFOTIP);
         for (int i = 0; i < 2; ++i) {
             LVCOLUMNW col{};
@@ -321,8 +321,8 @@ struct App {
             {BackupPage,L"&Backup"}, {RestorePage,L"&Restore"}, {ScanNow,L"Scan"}, {ScanFolder,L"Scan folder…"},
             {AddFolder,L"Add folder…"}, {AddFile,L"Add file…"}, {Change,L"Change path…"}, {Remove,L"Remove folder"},
             {ShowLog,L"Log…"}, {ScheduleButton,L"Schedule…"}, {SelectAll,L"Select all"}, {ClearAll,L"Clear selection"}, {Run,L"Back up now…"},
-            {Open,L"Open ZIP…"}, {Original,L"Original location"}, {NewLocation,L"New location…"},
-            {UseDetected,L"Use this PC’s folders"}, {Details,L"Scan issues…"}, {EditDestination,L"Change destination…"},
+            {Open,L"Open ZIP…"}, {Original,L"Original location"},
+            {NewLocation,L"New location…"}, {Details,L"Scan issues…"},
             {BrowseBackup,L"Browse…"}, {CancelTransfer,L"Cancel"}, {DeleteBackup,L"Delete backup…"}
         };
         for (const auto& [id, text] : labels) buttons[id] = Control(L"BUTTON", text, BS_OWNERDRAW | WS_TABSTOP, id);
@@ -368,9 +368,7 @@ struct App {
         if (restorePage) {
             place(mode, 30, lower + 10, width - 60, 23);
             button(Original, 30, lower + 39, 132, 32);
-            button(NewLocation, 170, lower + 39, 128, 32);
-            button(UseDetected, 306, lower + 39, 157, 32);
-            button(EditDestination, width - 191, lower + 39, 161, 32);
+            button(NewLocation, 170, lower + 39, 132, 32);
             place(destinations, 30, lower + 78, width - 60, 107);
             ListView_SetColumnWidth(destinations, 0, Px(242));
             ListView_SetColumnWidth(destinations, 1, Px(width - 325));
@@ -407,7 +405,7 @@ struct App {
         for (auto id : {ScanNow, ScanFolder, AddFolder, AddFile, Change, Remove, Details, BrowseBackup}) {
             ShowWindow(buttons[id], restorePage ? SW_HIDE : SW_SHOW);
         }
-        for (auto id : {Open, Original, NewLocation, UseDetected, EditDestination, DeleteBackup}) {
+        for (auto id : {Open, Original, NewLocation, DeleteBackup}) {
             ShowWindow(buttons[id], restorePage ? SW_SHOW : SW_HIDE);
         }
         ShowWindow(zipList, restorePage ? SW_SHOW : SW_HIDE);
@@ -433,8 +431,9 @@ struct App {
             if (id == Details) enabled &= backup && !backup->warnings.empty();
             if (id == Change) enabled &= Selected() && !Selected()->path.empty();
             if (id == Remove) enabled &= selectedSource != nullptr;
-            if (id == Original || id == UseDetected) enabled &= opened.originalLocations;
-            if (id == NewLocation || id == EditDestination) enabled &= opened.tree != nullptr;
+            if (id == Original) enabled &= opened.originalLocations;
+            if (id == NewLocation) enabled &= opened.tree != nullptr;
+            if (id == Run && restorePage) enabled &= original || !restoreFolder.empty();
             EnableWindow(control, enabled);
             InvalidateRect(control, nullptr, TRUE);
         }
@@ -443,7 +442,10 @@ struct App {
         EnableWindow(zipList, !busy && !loadingZip && !zips.empty());
         SetWindowTextW(buttons[Run], restorePage ? L"Restore selected…" : L"Back up now…");
         SetWindowTextW(summary, restorePage ? L"Archive contents" : L"Rainmeter setups");
-        SetWindowTextW(mode, original ? L"Restore to original locations" : L"Restore to new locations");
+        const std::wstring restoreMode = !opened.tree ? L"" :
+            original ? L"Restore to original locations" :
+            restoreFolder.empty() ? L"Choose a restore folder." : L"Restore under " + restoreFolder.wstring();
+        SetWindowTextW(mode, restoreMode.c_str());
         if (!busy && !loadingZip) {
             std::wstring label = notice;
             if (label.empty() && has) label = std::to_wstring(Active()->root.checked) + L" of " +
@@ -545,7 +547,6 @@ struct App {
             auto value = i < targets.size() && !targets[i].empty() ? targets[i].wstring() : L"Choose a destination";
             ListView_SetItemText(destinations, at, 1, value.data());
         }
-        if (!targets.empty()) ListView_SetItemState(destinations, 0, LVIS_SELECTED, LVIS_SELECTED);
     }
 
     void RecordSelection() {
@@ -710,6 +711,7 @@ struct App {
                 lastFolder = path.parent_path();
                 PopulateZips(lastFolder, currentZip);
                 original = opened.originalLocations;
+                restoreFolder.clear();
                 targets.clear();
                 for (const auto& source : opened.tree->sources) targets.push_back(source.path);
                 notice.clear();
@@ -738,6 +740,7 @@ struct App {
                 auto reopened = ReadZip(path);
                 opened = std::move(reopened);
                 original = opened.originalLocations;
+                restoreFolder.clear();
                 targets.clear();
                 for (const auto& source : opened.tree->sources) targets.push_back(source.path);
             } catch (const std::exception&) {}
@@ -745,6 +748,7 @@ struct App {
         if (wasOpen && !opened.archive) {
             opened = {};
             currentZip.clear();
+            restoreFolder.clear();
             targets.clear();
             original = false;
         }
@@ -813,24 +817,6 @@ struct App {
                 Message(window, std::to_wstring(count) + L" file(s) restored.");
             };
         }, L"Restore", currentZip);
-    }
-
-    void ChangeDestination() {
-        int row = ListView_GetNextItem(destinations, -1, LVNI_SELECTED);
-        if (row < 0 || !opened.tree) Fail(L"Select a root in the destination list.");
-        const auto& source = opened.tree->sources.at(row);
-        bool file = false;
-        if (opened.originalLocations) {
-            for (const auto& setup : opened.tree->root.children) {
-                for (const auto& node : setup->children) if (node->source == static_cast<size_t>(row)) file = !node->directory;
-            }
-        }
-        auto folder = Browse(window, Picker::Folder, file ? targets[row].parent_path() : targets[row]);
-        if (folder.empty()) return;
-        targets[row] = file ? folder / source.path.filename() : folder;
-        original = false;
-        FillDestinations();
-        Refresh();
     }
 
     void Command(int id, int notification);
@@ -1132,28 +1118,23 @@ void App::Command(int id, int notification) {
         break;
     case Original:
         original = true;
+        restoreFolder.clear();
         targets.clear();
         for (const auto& source : opened.tree->sources) targets.push_back(source.path);
         FillDestinations();
         Refresh();
         break;
     case NewLocation: {
-        auto folder = Browse(window, Picker::Folder, lastFolder);
-        if (!folder.empty()) {
-            original = false;
-            targets = NewLocations(opened, folder);
-            FillDestinations();
-            Refresh();
-        }
-        break;
-    }
-    case UseDetected:
+        auto folder = Browse(window, Picker::Folder, restoreFolder.empty() ? lastFolder : restoreFolder);
+        if (folder.empty()) break;
+        CheckPath(folder);
+        targets = NewLocations(opened, folder);
+        restoreFolder = std::move(folder);
         original = false;
-        targets = InstalledLocations(opened, sources);
         FillDestinations();
         Refresh();
         break;
-    case EditDestination: ChangeDestination(); break;
+    }
     case ScheduleButton: ShowSchedule(); break;
     case ShowLog: {
         ScheduleDialog dialog{*this, {}};
@@ -1309,7 +1290,6 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
                     if (node && !node->path.empty()) wcsncpy_s(tip->pszText, tip->cchTextMax, node->path.c_str(), _TRUNCATE);
                 }
             }
-            if (event->hwndFrom == app->destinations && event->code == NM_DBLCLK && !app->busy) app->ChangeDestination();
             break;
         }
         case WM_COMMAND:

@@ -20,7 +20,6 @@ void WriteZip(const Tree& tree, const fs::path& zip, const Transfer& transfer = 
     ZipDisposition disposition = ZipDisposition::ReplaceExisting);
 OpenZip ReadZip(const fs::path& path);
 std::vector<fs::path> NewLocations(const OpenZip& zip, const fs::path& folder);
-std::vector<fs::path> InstalledLocations(const OpenZip& zip, const std::vector<Source>& detected);
 struct RestorePlan {
     struct Item {
         fs::path target;

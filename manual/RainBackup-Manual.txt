@@ -41,9 +41,7 @@ RESTORE A BACKUP
 CHOOSE A RESTORE DESTINATION
 
 - Original location uses the exact paths stored in the backup. Use it when the same folders are still correct.
-- Use this PC's folders maps matching Rainmeter sources to the paths RainBackup knows on the destination PC. This is useful when the Windows account name changed or Documents is now in OneDrive. Check the destination list and set any unmatched paths manually.
-- New location... places the backup sources under a folder you choose. Use this to extract a copy for inspection or to lay out the files in a different location.
-- Change destination... lets you choose a folder for the selected source in the destination list. Use it for extra files and folders or for a portable setup that has moved.
+- New location... puts the selected files under one folder you choose. RainBackup keeps separate backup sources in separate subfolders.
 
 When a relocated restore includes Rainmeter.ini and a skins destination is mapped for the same setup, RainBackup updates SkinPath in the restored INI. New files inherit permissions from their destination folder. For overwrites, RainBackup attempts to preserve the existing file's owner and access controls and stops if Windows prevents that.
 

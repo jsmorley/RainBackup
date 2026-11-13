@@ -460,18 +460,6 @@ std::vector<fs::path> NewLocations(const OpenZip& zip, const fs::path& folder) {
     return result;
 }
 
-std::vector<fs::path> InstalledLocations(const OpenZip& zip, const std::vector<Source>& detected) {
-    std::vector<fs::path> result;
-    if (!zip.originalLocations) return {{}};
-    for (const auto& source : zip.tree->sources) {
-        auto match = std::find_if(detected.begin(), detected.end(), [&](const auto& candidate) {
-            return candidate.setup == source.setup && candidate.kind == source.kind;
-        });
-        result.push_back(match == detected.end() ? fs::path{} : match->path);
-    }
-    return result;
-}
-
 RestorePlan PlanRestore(const OpenZip& zip, const std::vector<fs::path>& destinations, bool relocate) {
     if (destinations.size() != zip.tree->sources.size()) Fail(L"Choose restore destinations.");
     RestorePlan plan;
