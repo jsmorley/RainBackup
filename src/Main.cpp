@@ -307,8 +307,8 @@ struct App {
         tree = Control(WC_TREEVIEWW, L"", WS_TABSTOP | TVS_HASBUTTONS | TVS_HASLINES | TVS_LINESATROOT |
             TVS_SHOWSELALWAYS | TVS_DISABLEDRAGDROP | TVS_INFOTIP, TreeId);
         TreeView_SetExtendedStyle(tree, TVS_EX_DOUBLEBUFFER, TVS_EX_DOUBLEBUFFER);
-        destinations = Control(WC_LISTVIEWW, L"", LVS_REPORT | LVS_SINGLESEL, Destinations);
-        ListView_SetExtendedListViewStyle(destinations, LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER | LVS_EX_INFOTIP);
+        destinations = Control(WC_LISTVIEWW, L"", LVS_REPORT, Destinations);
+        ListView_SetExtendedListViewStyle(destinations, LVS_EX_DOUBLEBUFFER | LVS_EX_INFOTIP);
         for (int i = 0; i < 2; ++i) {
             LVCOLUMNW col{};
             col.mask = LVCF_TEXT | LVCF_WIDTH;
@@ -1258,6 +1258,12 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
         }
         case WM_NOTIFY: {
             auto event = reinterpret_cast<NMHDR*>(lp);
+            if (event->hwndFrom == app->destinations && event->code == LVN_ITEMCHANGING) {
+                const auto* change = reinterpret_cast<const NMLISTVIEW*>(event);
+                // Destination rows are a preview. Keep scrolling and column resizing available.
+                if ((change->uChanged & LVIF_STATE) &&
+                    (change->uNewState & (LVIS_SELECTED | LVIS_FOCUSED))) return TRUE;
+            }
             if (event->hwndFrom == app->tree && !app->updating) {
                 if (event->code == TVN_SELCHANGEDW) app->Refresh();
                 if (event->code == TVN_ITEMEXPANDINGW) {
