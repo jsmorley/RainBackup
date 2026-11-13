@@ -44,11 +44,40 @@ Function LaunchRainBackup
 done:
 FunctionEnd
 
+Function CloseRunningCopies
+    InitPluginsDir
+    SetOutPath "$PLUGINSDIR"
+    ClearErrors
+    File /oname=RainBackupSetupCheck.exe "${RAINBACKUP_EXE}"
+    IfErrors stop
+retry:
+    ClearErrors
+    ExecWait '"$PLUGINSDIR\RainBackupSetupCheck.exe" --close-for-setup' $0
+    IfErrors blocked
+    StrCmp $0 0 done
+blocked:
+    IfSilent stop
+    MessageBox MB_RETRYCANCEL|MB_ICONEXCLAMATION "RainBackup is still running. Let any backup or restore finish, then click Retry. If an idle window is still open, close it first." IDRETRY retry
+stop:
+    SetErrorLevel 1
+    Quit
+done:
+FunctionEnd
+
 Section "RainBackup"
     SectionIn RO
     SetShellVarContext current
+    Call CloseRunningCopies
     SetOutPath "$INSTDIR"
+    ClearErrors
     File /oname=RainBackup.exe "${RAINBACKUP_EXE}"
+    IfErrors 0 installed
+    IfSilent installFailed
+    MessageBox MB_OK|MB_ICONSTOP "Setup could not replace RainBackup.exe. Close any running copy and run Setup again."
+installFailed:
+    SetErrorLevel 1
+    Quit
+installed:
     File "..\README.md"
     File "..\manual\RainBackup-Manual.txt"
     File "..\third_party\zlib\LICENSE"
@@ -83,11 +112,11 @@ FunctionEnd
 
 Function ConfirmInstall
     ${If} ${SectionIsSelected} ${StartMenuShortcut}
-        StrCpy $0 "A Start menu shortcut will be created for this Windows account."
+        StrCpy $0 "$\r$\n$\r$\nA Start menu shortcut will be created for this Windows account."
     ${Else}
-        StrCpy $0 "Setup will skip creating a Start menu shortcut."
+        StrCpy $0 ""
     ${EndIf}
-    MessageBox MB_YESNO|MB_ICONQUESTION|MB_DEFBUTTON2 "Install RainBackup to:$\r$\n$INSTDIR$\r$\n$\r$\n$0" IDYES proceed
+    MessageBox MB_YESNO|MB_ICONQUESTION|MB_DEFBUTTON2 "Install RainBackup to:$\r$\n$INSTDIR$0" IDYES proceed
     Abort
 proceed:
 FunctionEnd

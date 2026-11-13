@@ -1,8 +1,10 @@
 #include "Archive.h"
 #include "RainmeterSession.h"
 #include "Schedule.h"
+#include "SetupSession.h"
 
 #include <commctrl.h>
+#include <windowsx.h>
 #include <dwmapi.h>
 #include <shlobj.h>
 #include <shellapi.h>
@@ -14,11 +16,13 @@
 using namespace rb;
 namespace {
 constexpr UINT Finished = WM_APP + 1, ProgressUpdate = WM_APP + 2;
+constexpr int RainBackupIcon = 101;
+constexpr int HeaderLogoSize = 64;
 enum Id {
     BackupPage = 100, RestorePage, ScanNow, ScanFolder, AddFolder, AddFile, Change, Remove, ScheduleButton,
     SelectAll, ClearAll, Run, Open, Original, NewLocation, UseDetected, Details, ZipList, TreeId, Destinations,
     EditDestination, ScheduleFolder, Frequency, Time, Copies, SaveTask, RemoveTask, RunTask, CloseDialog,
-    BrowseBackup, BackupPath, CancelTransfer, DeleteBackup
+    BrowseBackup, BackupPath, CancelTransfer, DeleteBackup, ShowLog, EmptyLog
 };
 
 std::wstring Text(HWND control) {
@@ -142,6 +146,7 @@ struct JobResult {
     std::function<void()> done;
     std::wstring error;
     bool cancelled = false;
+    bool logFailed = false;
 };
 
 struct ProgressMessage {
@@ -155,10 +160,12 @@ struct App {
     HFONT regular{}, heading{}, section{};
     HIMAGELIST checks{}, icons{};
     HINSTANCE instance{};
+    HICON headerIcon{};
+    RECT backupField{};
     Palette palette;
     int dpi = 96;
     bool restorePage = false, busy = false, original = false, updating = false;
-    bool transferring = false;
+    bool transferring = false, loadingZip = false;
     std::stop_source stopTransfer;
     std::unique_ptr<Tree> backup;
     std::vector<Source> sources;
@@ -173,12 +180,18 @@ struct App {
 
     ~App() {
         if (worker.joinable()) worker.join();
+        if (headerIcon) DestroyIcon(headerIcon);
         for (auto font : {regular, heading, section}) DeleteObject(font);
         ImageList_Destroy(checks);
         ImageList_Destroy(icons);
     }
 
     int Px(int value) const { return MulDiv(value, dpi, 96); }
+    void LoadHeaderIcon() {
+        if (headerIcon) DestroyIcon(headerIcon);
+        headerIcon = static_cast<HICON>(LoadImageW(instance, MAKEINTRESOURCEW(RainBackupIcon),
+            IMAGE_ICON, Px(HeaderLogoSize), Px(HeaderLogoSize), 0));
+    }
     HWND Control(const wchar_t* type, const wchar_t* text, DWORD style, int id = 0) const {
         auto control = CreateWindowExW(0, type, text, WS_CHILD | WS_VISIBLE | style, 0, 0, 0, 0,
             window, reinterpret_cast<HMENU>(static_cast<INT_PTR>(id)), instance, nullptr);
@@ -273,6 +286,7 @@ struct App {
 
     void Init() {
         dpi = static_cast<int>(GetDpiForWindow(window));
+        LoadHeaderIcon();
         Fonts();
         title = Control(L"STATIC", L"RainBackup", SS_NOPREFIX);
         sub = Control(L"STATIC", L"Backup and restore your Rainmeter setups", SS_NOPREFIX);
@@ -287,7 +301,7 @@ struct App {
         lastFolder = LoadBackupFolder();
         if (lastFolder.empty()) lastFolder = KnownFolder(FOLDERID_Documents);
         backupPath = Control(L"EDIT", (lastFolder / BackupFilename()).c_str(),
-            WS_TABSTOP | WS_BORDER | ES_AUTOHSCROLL, BackupPath);
+            WS_TABSTOP | ES_AUTOHSCROLL, BackupPath);
         SendMessageW(backupPath, EM_SETLIMITTEXT, 32767, 0);
         tree = Control(WC_TREEVIEWW, L"", WS_TABSTOP | TVS_HASBUTTONS | TVS_HASLINES | TVS_LINESATROOT |
             TVS_SHOWSELALWAYS | TVS_DISABLEDRAGDROP | TVS_INFOTIP, TreeId);
@@ -305,9 +319,9 @@ struct App {
         const std::pair<int, const wchar_t*> labels[] = {
             {BackupPage,L"&Backup"}, {RestorePage,L"&Restore"}, {ScanNow,L"Scan"}, {ScanFolder,L"Scan folder…"},
             {AddFolder,L"Add folder…"}, {AddFile,L"Add file…"}, {Change,L"Change path…"}, {Remove,L"Remove folder"},
-            {ScheduleButton,L"Schedule…"}, {SelectAll,L"Select all"}, {ClearAll,L"Clear selection"}, {Run,L"Back up now…"},
+            {ShowLog,L"Log…"}, {ScheduleButton,L"Schedule…"}, {SelectAll,L"Select all"}, {ClearAll,L"Clear selection"}, {Run,L"Back up now…"},
             {Open,L"Open ZIP…"}, {Original,L"Original location"}, {NewLocation,L"New location…"},
-            {UseDetected,L"Use this PC’s folders"}, {Details,L"Scan details…"}, {EditDestination,L"Change destination…"},
+            {UseDetected,L"Use this PC’s folders"}, {Details,L"Scan issues…"}, {EditDestination,L"Change destination…"},
             {BrowseBackup,L"Browse…"}, {CancelTransfer,L"Cancel"}, {DeleteBackup,L"Delete backup…"}
         };
         for (const auto& [id, text] : labels) buttons[id] = Control(L"BUTTON", text, BS_OWNERDRAW | WS_TABSTOP, id);
@@ -325,9 +339,10 @@ struct App {
             MoveWindow(control, Px(x), Px(y), Px(w), Px(h), TRUE);
         };
         auto button = [&](int id, int x, int y, int w, int h = 34) { place(buttons.at(id), x, y, w, h); };
-        place(title, 29, 20, 440, 42);
-        place(sub, 31, 64, 480, 24);
+        place(title, 108, 20, width - 350, 42);
+        place(sub, 110, 64, width - 352, 24);
         button(ScheduleButton, width - 142, 36, 112, 38);
+        button(ShowLog, width - 230, 36, 80, 38);
         button(BackupPage, 30, 101, 119, 38);
         button(RestorePage, 157, 101, 119, 38);
         int y = 159;
@@ -362,9 +377,20 @@ struct App {
             place(detail, 30, lower + 7, width - 195, 25);
             button(Details, width - 149, lower + 2, 119, 30);
             place(backupPathLabel, 30, lower + 47, 85, 25);
-            place(backupPath, 116, lower + 43, width - 259, 29);
+            backupField = {Px(116), Px(lower + 43), Px(width - 143), Px(lower + 72)};
+            HDC dc = GetDC(backupPath);
+            auto previous = SelectObject(dc, regular);
+            TEXTMETRICW metrics{};
+            GetTextMetricsW(dc, &metrics);
+            SelectObject(dc, previous);
+            ReleaseDC(backupPath, dc);
+            const int fieldHeight = backupField.bottom - backupField.top;
+            const int textHeight = std::clamp<int>(metrics.tmHeight + 1, 1, fieldHeight - 2);
+            MoveWindow(backupPath, backupField.left + Px(5), backupField.top + (fieldHeight - textHeight) / 2,
+                backupField.right - backupField.left - Px(10), textHeight, TRUE);
             button(BrowseBackup, width - 132, lower + 40, 102, 34);
         }
+        InvalidateRect(window, nullptr, TRUE);
         place(status, 30, height - (transferring ? 57 : 46), width - 242, 21);
         place(progressBar, 30, height - 31, width - 291, 13);
         place(percentLabel, width - 253, height - 35, 43, 22);
@@ -383,7 +409,11 @@ struct App {
         for (auto id : {Open, Original, NewLocation, UseDetected, EditDestination, DeleteBackup}) {
             ShowWindow(buttons[id], restorePage ? SW_SHOW : SW_HIDE);
         }
-        for (auto control : {zipList, mode, destinations}) ShowWindow(control, restorePage ? SW_SHOW : SW_HIDE);
+        ShowWindow(zipList, restorePage ? SW_SHOW : SW_HIDE);
+        ShowWindow(tree, loadingZip ? SW_HIDE : SW_SHOW);
+        for (auto control : {mode, destinations}) {
+            ShowWindow(control, restorePage && !loadingZip ? SW_SHOW : SW_HIDE);
+        }
         ShowWindow(detail, restorePage ? SW_HIDE : SW_SHOW);
         ShowWindow(backupPathLabel, restorePage ? SW_HIDE : SW_SHOW);
         ShowWindow(backupPath, restorePage ? SW_HIDE : SW_SHOW);
@@ -395,7 +425,7 @@ struct App {
         auto selectedSource = SelectedSource();
         SetWindowTextW(buttons[Remove], selectedSource && !selectedSource->directory ? L"Remove file" : L"Remove folder");
         for (auto& [id, control] : buttons) {
-            bool enabled = !busy;
+            bool enabled = !busy && !loadingZip;
             if (id == CancelTransfer) enabled = transferring && !stopTransfer.stop_requested();
             if (id == SelectAll || id == ClearAll) enabled &= has;
             if (id == Run) enabled &= has && Active()->root.checked != 0;
@@ -407,13 +437,13 @@ struct App {
             EnableWindow(control, enabled);
             InvalidateRect(control, nullptr, TRUE);
         }
-        EnableWindow(tree, !busy);
-        EnableWindow(destinations, !busy);
-        EnableWindow(zipList, !busy && !zips.empty());
+        EnableWindow(tree, !busy && !loadingZip);
+        EnableWindow(destinations, !busy && !loadingZip);
+        EnableWindow(zipList, !busy && !loadingZip && !zips.empty());
         SetWindowTextW(buttons[Run], restorePage ? L"Restore selected…" : L"Back up now…");
         SetWindowTextW(summary, restorePage ? L"Archive contents" : L"Rainmeter setups");
         SetWindowTextW(mode, original ? L"Restore to original locations" : L"Restore to new locations");
-        if (!busy) {
+        if (!busy && !loadingZip) {
             std::wstring label = notice;
             if (label.empty() && has) label = std::to_wstring(Active()->root.checked) + L" of " +
                 std::to_wstring(Active()->root.total) + L" items selected";
@@ -473,7 +503,8 @@ struct App {
     }
 
     void Populate() {
-        SendMessageW(tree, WM_SETREDRAW, FALSE, 0);
+        // WM_SETREDRAW(TRUE) makes a hidden window visible.
+        if (!loadingZip) SendMessageW(tree, WM_SETREDRAW, FALSE, 0);
         updating = true;
         TreeView_DeleteAllItems(tree);
         items.clear();
@@ -486,12 +517,17 @@ struct App {
             }
         }
         updating = false;
-        SendMessageW(tree, WM_SETREDRAW, TRUE, 0);
+        if (!loadingZip) SendMessageW(tree, WM_SETREDRAW, TRUE, 0);
+        ScrollTreeToTop();
         InvalidateRect(tree, nullptr, TRUE);
         SetWindowTextW(detail, !backup || backup->warnings.empty() ? L"Select folders or expand them to choose individual files." :
             (std::to_wstring(backup->warnings.size()) + L" scan notices. Review before backing up.").c_str());
         FillDestinations();
         Refresh();
+    }
+
+    void ScrollTreeToTop() const {
+        if (auto first = TreeView_GetRoot(tree)) TreeView_SelectSetFirstVisible(tree, first);
     }
 
     void FillDestinations() {
@@ -546,10 +582,10 @@ struct App {
     }
 
     template<class Work>
-    void Start(std::wstring label, Work work, bool showTransfer = false) {
+    void Start(std::wstring label, Work work, std::wstring operation = {}, fs::path location = {}) {
         if (busy) return;
         busy = true;
-        transferring = showTransfer;
+        transferring = !operation.empty();
         stopTransfer = std::stop_source{};
         if (transferring) {
             SendMessageW(progressBar, PBM_SETPOS, 0, 0);
@@ -557,7 +593,8 @@ struct App {
         }
         SetWindowTextW(status, label.c_str());
         Refresh();
-        worker = std::thread([this, work = std::move(work), stop = stopTransfer.get_token()]() mutable {
+        worker = std::thread([this, work = std::move(work), stop = stopTransfer.get_token(),
+            operation = std::move(operation), location = std::move(location)]() mutable {
             auto publish = [this, last = ULONGLONG{}](const std::wstring& text, int percent) mutable {
                 auto now = GetTickCount64();
                 if (now - last < 120) return;
@@ -567,10 +604,13 @@ struct App {
             };
             auto result = std::make_unique<JobResult>();
             try {
-                if constexpr (std::is_invocable_v<Work, const Progress&, const Transfer&>) {
-                    result->done = work([&](std::wstring text) { publish(text, -1); }, Transfer{publish, stop});
+                const Progress update = [&](std::wstring text) { publish(text, -1); };
+                if constexpr (std::is_invocable_v<Work, const Progress&, const Transfer&, fs::path&>) {
+                    result->done = work(update, Transfer{publish, stop}, location);
+                } else if constexpr (std::is_invocable_v<Work, const Progress&, const Transfer&>) {
+                    result->done = work(update, Transfer{publish, stop});
                 } else {
-                    result->done = work([&](std::wstring text) { publish(text, -1); });
+                    result->done = work(update);
                 }
             }
             catch (const Cancelled& error) {
@@ -578,6 +618,17 @@ struct App {
                 result->error = Utf16(error.what());
             }
             catch (const std::exception& error) { result->error = Utf16(error.what(), CP_ACP); try { result->error = Utf16(error.what()); } catch (...) {} }
+            if (!operation.empty()) {
+                auto detail = location.wstring();
+                if (!result->error.empty()) detail += L"\n" + result->error;
+                try {
+                    LogOperation(operation, result->cancelled ? L"Canceled" :
+                        result->error.empty() ? L"Success" : L"Failure", detail,
+                        result->error.empty() || operation == L"Restore" ? location : fs::path{});
+                } catch (const std::exception&) {
+                    result->logFailed = true;
+                }
+            }
             if (PostMessageW(window, Finished, 0, reinterpret_cast<LPARAM>(result.get()))) result.release();
         });
     }
@@ -606,10 +657,16 @@ struct App {
             auto model = Build(std::move(list), progress);
             ApplyIgnored(*model, exclusions);
             auto holder = std::make_shared<std::unique_ptr<Tree>>(std::move(model));
-            return [this, holder, exclusions = std::move(exclusions), added, initial, folder] {
+            std::wstring startupNotice;
+            if (initial) {
+                try { startupNotice = LastScheduledBackup(); }
+                catch (const std::exception&) {}
+            }
+            return [this, holder, exclusions = std::move(exclusions), added, initial, folder,
+                startupNotice = std::move(startupNotice)] {
                 ignored = exclusions;
                 Adopt(std::move(*holder), !initial && !folder.empty() && !added
-                    ? L"No new portable Rainmeter setups found." : L"");
+                    ? L"No new portable Rainmeter setups found." : startupNotice);
             };
         });
     }
@@ -643,6 +700,7 @@ struct App {
     }
 
     void LoadZip(fs::path path) {
+        loadingZip = true;
         Start(L"Reading ZIP contents…", [this, path = std::move(path)](const Progress&) {
             auto zip = std::make_shared<OpenZip>(ReadZip(path));
             return [this, path, zip] {
@@ -707,7 +765,7 @@ struct App {
         if (!Confirm(window, L"Create a backup ZIP with " + std::to_wstring(backup->root.checked) +
             L" selected items?\n\n" + path.wstring() +
             (fs::exists(path) ? L"\n\nThe existing ZIP will be replaced." : L"") +
-            (!backup->warnings.empty() ? L"\n\nSome source items were unavailable. See Scan details for paths." : L"") +
+            (!backup->warnings.empty() ? L"\n\nSome source items were unavailable. See Scan issues for paths." : L"") +
             L"\n\nSelected online-only files may download from OneDrive.")) return;
         Start(L"Creating backup…", [this, path](const Progress&, const Transfer& transfer) {
             WriteZip(*backup, path, transfer);
@@ -718,7 +776,7 @@ struct App {
                 Message(window, L"Backup saved to\n" + path.wstring());
                 SaveBackupFolder(lastFolder);
             };
-        }, true);
+        }, L"Backup", path);
     }
 
     void RunRestore() {
@@ -753,7 +811,7 @@ struct App {
                 notice = L"Restore completed";
                 Message(window, std::to_wstring(count) + L" file(s) restored.");
             };
-        }, true);
+        }, L"Restore", currentZip);
     }
 
     void ChangeDestination() {
@@ -779,10 +837,19 @@ struct App {
 };
 
 struct ScheduleDialog {
+    static constexpr int Width = 612;
+    static constexpr int Height = 272;
+    static constexpr int Padding = 24;
+    static constexpr int Footer = Height - Padding - 32;
+    static constexpr int SaveWidth = 132;
+    static constexpr int SaveLeft = Width - Padding - SaveWidth;
+
     App& app;
     Schedule schedule;
     HWND dialog{}, folder{}, time{}, copies{}, frequency{};
-    bool open = true, runNow = false;
+    HWND logText{}, emptyLog{}, closeLog{};
+    bool open = true, runNow = false, showLog = false;
+    std::wstring logContents;
 
     HWND Add(const wchar_t* type, const wchar_t* label, DWORD style, int id, int x, int y, int w, int h) {
         auto control = CreateWindowExW(0, type, label, WS_CHILD | WS_VISIBLE | style, app.Px(x), app.Px(y),
@@ -792,23 +859,40 @@ struct ScheduleDialog {
     }
 
     void Init() {
-        Add(L"STATIC", L"Backup destination", 0, 0, 20, 20, 360, 20);
-        folder = Add(L"EDIT", schedule.folder.c_str(), WS_BORDER | ES_AUTOHSCROLL | WS_TABSTOP, 0, 20, 44, 395, 27);
-        Add(L"BUTTON", L"Browse…", WS_TABSTOP, ScheduleFolder, 425, 43, 92, 29);
-        Add(L"STATIC", L"Frequency", 0, 0, 20, 92, 165, 22);
-        Add(L"STATIC", L"Local time (24-hour)", 0, 0, 211, 92, 150, 22);
-        Add(L"STATIC", L"Copies to keep", 0, 0, 388, 92, 129, 22);
-        frequency = Add(WC_COMBOBOXW, L"", CBS_DROPDOWNLIST | WS_TABSTOP, Frequency, 20, 116, 165, 95);
+        if (showLog) {
+            logText = Add(L"EDIT", L"", WS_BORDER | WS_VSCROLL | WS_HSCROLL | WS_TABSTOP |
+                ES_MULTILINE | ES_AUTOHSCROLL | ES_AUTOVSCROLL | ES_READONLY, 0,
+                Padding, Padding, Width - 2 * Padding, Footer - Padding - 16);
+            emptyLog = Add(L"BUTTON", L"Empty log", WS_TABSTOP, EmptyLog, Padding, Footer, 110, 32);
+            closeLog = Add(L"BUTTON", L"Close", BS_DEFPUSHBUTTON | WS_TABSTOP, CloseDialog,
+                Width - Padding - 84, Footer, 84, 32);
+            RefreshLog();
+            return;
+        }
+        Add(L"STATIC", L"Backup destination", 0, 0, Padding, 18, 360, 20);
+        folder = Add(L"EDIT", schedule.folder.c_str(), WS_BORDER | ES_AUTOHSCROLL | WS_TABSTOP, 0, Padding, 42, 456, 27);
+        Add(L"BUTTON", L"Browse…", WS_TABSTOP, ScheduleFolder, 492, 41, 96, 29);
+        Add(L"STATIC", L"Frequency", 0, 0, Padding, 88, 190, 22);
+        Add(L"STATIC", L"Local time (24-hour)", 0, 0, 238, 88, 155, 22);
+        Add(L"STATIC", L"Copies to keep", 0, 0, 417, 88, 140, 22);
+        frequency = Add(WC_COMBOBOXW, L"", CBS_DROPDOWNLIST | WS_TABSTOP, Frequency, Padding, 112, 190, 95);
         SendMessageW(frequency, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Daily"));
         SendMessageW(frequency, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Weekly on Monday"));
         SendMessageW(frequency, CB_SETCURSEL, schedule.weekly ? 1 : 0, 0);
-        time = Add(L"EDIT", schedule.time.c_str(), WS_BORDER | WS_TABSTOP, Time, 211, 116, 112, 27);
-        copies = Add(L"EDIT", std::to_wstring(schedule.copies).c_str(), WS_BORDER | ES_NUMBER | WS_TABSTOP, Copies, 388, 116, 90, 27);
-        Add(L"STATIC", L"Missed runs catch up when Windows and your account are available.\nAfter a successful run, the oldest managed copies are removed first.", 0, 0, 20, 163, 497, 50);
-        Add(L"BUTTON", L"Save schedule", BS_DEFPUSHBUTTON | WS_TABSTOP, SaveTask, 391, 223, 126, 32);
-        Add(L"BUTTON", L"Back up now…", WS_TABSTOP, RunTask, 265, 223, 116, 32);
-        Add(L"BUTTON", L"Remove schedule", WS_TABSTOP, RemoveTask, 20, 223, 132, 32);
-        Add(L"BUTTON", L"Close", WS_TABSTOP, CloseDialog, 167, 223, 85, 32);
+        time = Add(L"EDIT", schedule.time.c_str(), WS_BORDER | WS_TABSTOP, Time, 238, 112, 130, 27);
+        copies = Add(L"EDIT", std::to_wstring(schedule.copies).c_str(), WS_BORDER | ES_NUMBER | WS_TABSTOP, Copies, 417, 112, 100, 27);
+        Add(L"STATIC", L"Missed runs catch up when your account is available.\nSuccessful backups remove the oldest excess copies.", 0, 0, Padding, 158, SaveLeft - Padding - 16, 42);
+        Add(L"BUTTON", L"Remove schedule", WS_TABSTOP, RemoveTask, Padding, Footer, 140, 32);
+        Add(L"BUTTON", L"Close", WS_TABSTOP, CloseDialog, 226, Footer, 84, 32);
+        Add(L"BUTTON", L"Back up now…", WS_TABSTOP, RunTask, 322, Footer, 122, 32);
+        Add(L"BUTTON", L"Save schedule", BS_DEFPUSHBUTTON | WS_TABSTOP, SaveTask, SaveLeft, Footer, SaveWidth, 32);
+    }
+
+    void RefreshLog() {
+        SetWindowTextW(logText, logContents.empty() ? L"No operations recorded yet." : logContents.c_str());
+        SendMessageW(logText, EM_SETSEL, logContents.size(), logContents.size());
+        SendMessageW(logText, EM_SCROLLCARET, 0, 0);
+        EnableWindow(emptyLog, !logContents.empty());
     }
 
     Schedule Values() const {
@@ -825,6 +909,14 @@ struct ScheduleDialog {
 
     void Command(int id) {
         switch (id) {
+        case EmptyLog:
+            if (Confirm(dialog, L"Empty the backup and restore log?")) {
+                EmptyOperationLog();
+                logContents = ReadOperationLog();
+                RefreshLog();
+                SetFocus(closeLog);
+            }
+            break;
         case ScheduleFolder: {
             auto selected = Browse(dialog, Picker::Folder, Text(folder));
             if (!selected.empty()) SetWindowTextW(folder, selected.c_str());
@@ -881,6 +973,10 @@ struct ScheduleDialog {
         case WM_CTLCOLORSTATIC: {
             HDC dc = reinterpret_cast<HDC>(wp);
             SetTextColor(dc, self->app.palette.text);
+            if (reinterpret_cast<HWND>(lp) == self->logText) {
+                SetBkColor(dc, self->app.palette.panel);
+                return reinterpret_cast<LRESULT>(self->app.palette.surface);
+            }
             SetBkMode(dc, TRANSPARENT);
             return reinterpret_cast<LRESULT>(self->app.palette.background);
         }
@@ -905,18 +1001,19 @@ struct ScheduleDialog {
         RECT owner{};
         GetWindowRect(app.window, &owner);
         DWORD style = WS_POPUP | WS_CAPTION | WS_SYSMENU;
-        RECT r{0, 0, app.Px(537), app.Px(277)};
+        RECT r{0, 0, app.Px(Width), app.Px(Height)};
         AdjustWindowRectExForDpi(&r, style, FALSE, WS_EX_DLGMODALFRAME, app.dpi);
         int w = r.right - r.left, h = r.bottom - r.top;
-        dialog = CreateWindowExW(WS_EX_DLGMODALFRAME | WS_EX_CONTROLPARENT, name, L"Schedule backups", style,
+        dialog = CreateWindowExW(WS_EX_DLGMODALFRAME | WS_EX_CONTROLPARENT, name,
+            showLog ? L"Backup and restore log" : L"Schedule backups", style,
             (owner.left + owner.right - w) / 2, (owner.top + owner.bottom - h) / 2,
             w, h, app.window, nullptr, app.instance, this);
-        if (!dialog) Fail(L"Could not open backup scheduling.");
+        if (!dialog) Fail(showLog ? L"Could not open the operation log." : L"Could not open backup scheduling.");
         BOOL dark = app.palette.dark;
         DwmSetWindowAttribute(dialog, 20, &dark, sizeof(dark));
         EnableWindow(app.window, FALSE);
         ShowWindow(dialog, SW_SHOW);
-        SetFocus(folder);
+        SetFocus(showLog ? closeLog : folder);
         MSG message{};
         while (open && GetMessageW(&message, nullptr, 0, 0) > 0) {
             if (message.message == WM_KEYDOWN && message.wParam == VK_ESCAPE) { open = false; continue; }
@@ -937,18 +1034,20 @@ void App::ShowSchedule() {
     if (dialog.schedule.folder.empty()) dialog.schedule.folder = lastFolder;
     dialog.Show();
     if (dialog.runNow) {
+        const auto destination = dialog.schedule.folder;
         Start(L"Creating managed backup…", [this, schedule = std::move(dialog.schedule)](
-            const Progress& progress, const Transfer& transfer) {
+            const Progress& progress, const Transfer& transfer, fs::path& location) {
             auto model = Build(sources, progress, transfer.stop);
             ApplyIgnored(*model, ignored);
-            if (model->incomplete) Fail(L"Backup stopped because a source item could not be read. Review Scan details in RainBackup.");
+            if (model->incomplete) Fail(L"Backup stopped because a source item could not be read. Review Scan issues in RainBackup.");
             auto path = SaveManagedBackup(*model, schedule, transfer);
+            location = path;
             return [this, path] {
                 lastFolder = path.parent_path();
                 notice = L"Managed backup saved";
                 Message(window, L"Backup saved to\n" + path.wstring());
             };
-        }, true);
+        }, L"Managed backup", destination);
     }
     Refresh();
 }
@@ -1056,6 +1155,13 @@ void App::Command(int id, int notification) {
         break;
     case EditDestination: ChangeDestination(); break;
     case ScheduleButton: ShowSchedule(); break;
+    case ShowLog: {
+        ScheduleDialog dialog{*this, {}};
+        dialog.showLog = true;
+        dialog.logContents = ReadOperationLog();
+        dialog.Show();
+        break;
+    }
     case Details: {
         std::wstring warnings;
         for (const auto& warning : backup->warnings) {
@@ -1087,11 +1193,34 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
         }
         case WM_DPICHANGED: {
             app->dpi = HIWORD(wp);
+            app->LoadHeaderIcon();
             app->Fonts();
             app->Theme();
             auto r = reinterpret_cast<RECT*>(lp);
             SetWindowPos(window, nullptr, r->left, r->top, r->right - r->left, r->bottom - r->top, SWP_NOZORDER | SWP_NOACTIVATE);
             return 0;
+        }
+        case WM_PAINT: {
+            PAINTSTRUCT paint{};
+            auto dc = BeginPaint(window, &paint);
+            if (app->headerIcon) DrawIconEx(dc, app->Px(30), app->Px(20), app->headerIcon,
+                app->Px(HeaderLogoSize), app->Px(HeaderLogoSize), 0, nullptr, DI_NORMAL);
+            if (!app->restorePage && app->backupPath) {
+                FillRect(dc, &app->backupField, app->palette.surface);
+                auto border = CreateSolidBrush(GetFocus() == app->backupPath ? app->palette.accent : app->palette.border);
+                FrameRect(dc, &app->backupField, border);
+                DeleteObject(border);
+            }
+            EndPaint(window, &paint);
+            return 0;
+        }
+        case WM_LBUTTONDOWN: {
+            POINT point{GET_X_LPARAM(lp), GET_Y_LPARAM(lp)};
+            if (!app->restorePage && IsWindowEnabled(app->backupPath) && PtInRect(&app->backupField, point)) {
+                SetFocus(app->backupPath);
+                return 0;
+            }
+            break;
         }
         case WM_SETTINGCHANGE:
         case WM_THEMECHANGED:
@@ -1100,6 +1229,11 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
         case WM_CTLCOLORSTATIC: {
             auto dc = reinterpret_cast<HDC>(wp);
             auto child = reinterpret_cast<HWND>(lp);
+            if (child == app->backupPath) {
+                SetTextColor(dc, app->palette.quiet);
+                SetBkColor(dc, app->palette.panel);
+                return reinterpret_cast<LRESULT>(app->palette.surface);
+            }
             SetTextColor(dc, child == app->title || child == app->summary ? app->palette.text : app->palette.quiet);
             SetBkMode(dc, TRANSPARENT);
             return reinterpret_cast<LRESULT>(app->palette.background);
@@ -1178,7 +1312,12 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
             if (event->hwndFrom == app->destinations && event->code == NM_DBLCLK && !app->busy) app->ChangeDestination();
             break;
         }
-        case WM_COMMAND: app->Command(LOWORD(wp), HIWORD(wp)); return 0;
+        case WM_COMMAND:
+            if (LOWORD(wp) == BackupPath && (HIWORD(wp) == EN_SETFOCUS || HIWORD(wp) == EN_KILLFOCUS)) {
+                InvalidateRect(window, &app->backupField, FALSE);
+            }
+            app->Command(LOWORD(wp), HIWORD(wp));
+            return 0;
         case ProgressUpdate: {
             std::unique_ptr<ProgressMessage> progress(reinterpret_cast<ProgressMessage*>(lp));
             if (app->busy && !app->stopTransfer.stop_requested()) {
@@ -1199,20 +1338,39 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
                 SetWindowTextW(app->status, L"Completed");
                 EnableWindow(app->buttons[CancelTransfer], FALSE);
             }
-            app->busy = false;
+            const bool loadedZip = app->loadingZip;
+            // Keep the loading state through the UI commit, as well as the ZIP read.
+            app->busy = loadedZip;
             app->transferring = false;
             if (!result->error.empty()) {
+                app->busy = false;
+                app->loadingZip = false;
                 app->notice = result->cancelled ? L"Operation canceled" : L"Operation stopped";
                 if (!app->currentZip.empty()) app->PopulateZips(app->currentZip.parent_path(), app->currentZip);
                 app->Refresh();
                 Message(window, result->error, result->cancelled ? MB_ICONINFORMATION : MB_ICONERROR);
             } else if (result->done) {
                 app->Refresh();
-                result->done();
+                try {
+                    result->done();
+                } catch (...) {
+                    app->busy = false;
+                    app->loadingZip = false;
+                    app->Refresh();
+                    throw;
+                }
             }
+            if (loadedZip) app->ScrollTreeToTop();
+            app->busy = false;
+            app->loadingZip = false;
+            if (result->logFailed) app->notice += L" · Could not write the operation log.";
             app->Refresh();
             return 0;
         }
+        case SetupCloseMessage:
+            if (app->busy || !IsWindowEnabled(window)) return SetupCloseBusy;
+            PostMessageW(window, WM_CLOSE, 0, 0);
+            return SetupCloseAccepted;
         case WM_CLOSE:
             if (app->busy) Message(window, L"Wait for the current operation to finish.");
             else DestroyWindow(window);
@@ -1231,6 +1389,7 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
 
 int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR arguments, int show) {
     std::wstring_view args(arguments);
+    if (args == L"--close-for-setup") return CloseRainBackupForSetup();
     if (args == L"--scheduled") return RunScheduled(true);
     if (args == L"--remove-schedule") {
         CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
@@ -1251,7 +1410,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR arguments, int show) {
     wc.lpfnWndProc = WindowProc;
     wc.lpszClassName = L"RainBackup";
     wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
-    wc.hIcon = LoadIconW(instance, MAKEINTRESOURCEW(101));
+    wc.hIcon = LoadIconW(instance, MAKEINTRESOURCEW(RainBackupIcon));
     if (!wc.hIcon) wc.hIcon = LoadIconW(nullptr, IDI_APPLICATION);
     wc.hIconSm = wc.hIcon;
     RegisterClassExW(&wc);

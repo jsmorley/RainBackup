@@ -23,6 +23,8 @@ Interactive backups and restores show the current path and percent complete. **C
 
 **Schedule** sets a daily or Monday backup, a local time, a destination, and how many managed copies to keep. Windows Task Scheduler runs it under the signed-in account. A missed backup runs when Windows and the account become available. Several missed intervals produce one current snapshot. The oldest managed ZIPs are removed after a successful backup. Other ZIPs are left alone. The schedule and latest result are stored in the RainBackup folder under Local AppData.
 
+Open **Log…** on the main window for dated backup and restore results. **Empty log** clears the history after confirmation.
+
 ## Build
 
 Configure with `cmake -S . -B build -A x64`, then run `cmake --build build --config Release` and `ctest --test-dir build -C Release --output-on-failure`. To build the installer, create the `dist` folder and compile `installer/RainBackup.nsi` with NSIS.

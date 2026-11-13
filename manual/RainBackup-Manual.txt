@@ -10,6 +10,8 @@ INSTALL OR UPGRADE RAINBACKUP
 
 The plain-text manual is installed as RainBackup-Manual.txt in the same folder as RainBackup.exe.
 
+Setup closes idle RainBackup windows before replacing the program files. If a backup or restore is running, wait for it to finish, then click Retry.
+
 CHOOSE WHAT TO BACK UP
 
 1. Open Backup and click Scan. RainBackup looks for the installed copy and any running portable copies it can identify. It reads Rainmeter's configured skins path and shows the skins separately from Settings & Plugins.
@@ -18,7 +20,7 @@ CHOOSE WHAT TO BACK UP
 4. Use Add folder... or Add file... for anything else you want to include. For example, add C:\rainmeter-plugin-sdk if you want the SDK in the same archive.
 5. To replace a configured path, select the source and click Change path.... To take an entire source off the list, select its top-level folder or file and click Remove folder or Remove file. The Yes/No prompt shows exactly which path will be removed from future backups. Your files and existing ZIPs stay in place. To skip a nested folder or file, uncheck it in the tree.
 
-RainBackup remembers your sources and checkbox choices. Review Scan details... if the scan reports unavailable paths or skipped links. Use Scan before a manual backup if you've added or removed files since the tree was loaded.
+RainBackup remembers your sources and checkbox choices. Review Scan issues... if the scan reports unavailable paths or skipped links. Use Scan before a manual backup if you've added or removed files since the tree was loaded.
 
 CREATE A BACKUP ZIP
 
@@ -57,7 +59,15 @@ Windows Task Scheduler runs the backup under your signed-in account. When Window
 
 Back up now... inside the Schedule dialog makes a managed backup immediately using the destination and retention you've entered. Back up now... on the main Backup screen saves the ZIP you named without pruning older copies.
 
-Click Remove schedule to stop future automatic runs and keep existing ZIPs. To check the latest scheduled run, open %LOCALAPPDATA%\RainBackup\scheduled.log.
+Click Remove schedule to stop future automatic runs and keep existing ZIPs.
+
+VIEW OR EMPTY THE OPERATION LOG
+
+Click Log... next to Schedule... on the main window to see manual backups, scheduled backups, and restores recorded by RainBackup. Each entry shows the local date and time and whether the operation succeeded, failed, or was canceled. The most recent entries are at the bottom. Click Empty log and confirm to clear the history. Backup ZIPs and schedule settings stay in place.
+
+When RainBackup starts, the bottom-left status area shows the date and result of the last scheduled backup in the log.
+
+The log file is stored at %LOCALAPPDATA%\RainBackup\operations.log. Paste that path into File Explorer's address bar to open it directly.
 
 DELETE AN OLD BACKUP
 

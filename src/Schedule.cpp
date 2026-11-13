@@ -109,15 +109,106 @@ bool IsManaged(std::wstring_view name) {
     return true;
 }
 
-void WriteLog(std::wstring message) {
+class LogLock {
+public:
+    LogLock() {
+        handle = CreateMutexW(nullptr, FALSE, L"Local\\RainBackup-OperationLog");
+        if (!handle) Fail(L"Could not open the operation log.");
+        auto wait = WaitForSingleObject(handle, 5000);
+        if (wait != WAIT_OBJECT_0 && wait != WAIT_ABANDONED) {
+            CloseHandle(handle);
+            Fail(L"The operation log is busy.");
+        }
+    }
+    ~LogLock() { ReleaseMutex(handle); CloseHandle(handle); }
+    LogLock(const LogLock&) = delete;
+    LogLock& operator=(const LogLock&) = delete;
+private:
+    HANDLE handle;
+};
+}
+
+void LogOperation(std::wstring_view operation, std::wstring_view result, std::wstring_view detail,
+    const fs::path& archive) {
+    std::error_code sizeError;
+    const auto size = archive.empty() ? 0 : fs::file_size(archive, sizeError);
+    LogLock lock;
     SYSTEMTIME now{};
     GetLocalTime(&now);
-    auto path = SchedulePath(L"scheduled.log");
+    auto path = SchedulePath(L"operations.log");
     fs::create_directories(path.parent_path());
-    std::ofstream log(path, std::ios::binary | std::ios::trunc);
-    log << now.wYear << '-' << now.wMonth << '-' << now.wDay << ' ' << now.wHour
-        << ':' << now.wMinute << ' ' << Utf8(message) << "\r\n";
+    wchar_t date[32]{};
+    swprintf_s(date, L"%04u-%02u-%02u %02u:%02u:%02u",
+        now.wYear, now.wMonth, now.wDay, now.wHour, now.wMinute, now.wSecond);
+    std::ofstream log(path, std::ios::binary | std::ios::app);
+    log << Utf8(date) << "  |  " << Utf8(operation) << "  |  " << Utf8(result) << "\r\n";
+    if (!detail.empty()) {
+        auto text = Utf8(detail);
+        text.erase(std::remove(text.begin(), text.end(), '\r'), text.end());
+        std::istringstream lines(text);
+        std::string line;
+        while (std::getline(lines, line)) log << "    " << line << "\r\n";
+    }
+    if (!archive.empty() && !sizeError) {
+        std::ostringstream formatted;
+        constexpr uintmax_t KB = 1000;
+        constexpr uintmax_t MB = KB * 1000;
+        constexpr uintmax_t GB = MB * 1000;
+        constexpr uintmax_t TB = GB * 1000;
+        if (size >= KB) {
+            const auto [unit, label] = size >= TB ? std::pair{TB, "TB"} :
+                size >= GB ? std::pair{GB, "GB"} : size >= MB ? std::pair{MB, "MB"} : std::pair{KB, "kB"};
+            formatted << std::fixed << std::setprecision(3) << static_cast<double>(size) / unit
+                << ' ' << label << " (" << size << " bytes)";
+        } else {
+            formatted << size << " bytes";
+        }
+        log << "    ZIP size: " << formatted.str() << "\r\n";
+    }
+    log << "\r\n";
+    log.close();
+    if (!log) Fail(L"Could not write the operation log.");
 }
+
+std::wstring ReadOperationLog() {
+    LogLock lock;
+    auto path = SchedulePath(L"operations.log");
+    std::ifstream log(path, std::ios::binary);
+    if (!log && fs::exists(path)) Fail(L"Could not read the operation log.");
+    return Utf16(std::string((std::istreambuf_iterator<char>(log)), {}));
+}
+
+std::wstring LastScheduledBackup() {
+    LogLock lock;
+    std::ifstream log(SchedulePath(L"operations.log"), std::ios::binary);
+    if (!log) {
+        std::ifstream previous(SchedulePath(L"scheduled.log"), std::ios::binary);
+        std::string date, time, detail;
+        if (previous >> date >> time && std::getline(previous, detail) && !detail.empty()) {
+            return L"Last scheduled backup " + std::wstring(detail.starts_with(" Saved ") ? L"succeeded" : L"failed") +
+                L" · " + Utf16(date + " " + time);
+        }
+        return {};
+    }
+    constexpr std::string_view marker = "  |  Scheduled backup  |  ";
+    std::string line;
+    std::wstring latest;
+    while (std::getline(log, line)) {
+        if (line.size() <= 19 || !std::string_view(line).substr(19).starts_with(marker)) continue;
+        const auto result = std::string_view(line).substr(19 + marker.size());
+        if (result == "Success\r" || result == "Failure\r") {
+            latest = L"Last scheduled backup " + std::wstring(result == "Success\r" ? L"succeeded" : L"failed") +
+                L" · " + Utf16(std::string_view(line).substr(0, 19));
+        }
+    }
+    return latest;
+}
+
+void EmptyOperationLog() {
+    LogLock lock;
+    std::ofstream log(SchedulePath(L"operations.log"), std::ios::binary | std::ios::trunc);
+    log.close();
+    if (!log) Fail(L"Could not empty the operation log.");
 }
 
 Schedule LoadSchedule() {
@@ -256,6 +347,7 @@ fs::path SaveManagedBackup(const Tree& tree, const Schedule& schedule, const Tra
 }
 
 int RunScheduled(bool catchUp) {
+    fs::path zip;
     try {
         auto schedule = LoadSchedule();
         if (schedule.folder.empty()) return 0;
@@ -272,18 +364,18 @@ int RunScheduled(bool catchUp) {
         }
         auto tree = Build(LoadSources());
         ApplyIgnored(*tree, LoadIgnored());
-        if (tree->incomplete) Fail(L"Backup stopped because a source item could not be read. Review Scan details in RainBackup.");
-        auto zip = SaveManagedBackup(*tree, schedule);
+        if (tree->incomplete) Fail(L"Backup stopped because a source item could not be read. Review Scan issues in RainBackup.");
+        zip = SaveManagedBackup(*tree, schedule);
         std::ofstream last(lastPath, std::ios::trunc);
         last << due << ' ' << schedule.weekly << ' ' << std::quoted(Utf8(schedule.time))
             << ' ' << std::quoted(Utf8(schedule.folder.native())) << '\n';
         last.close();
         if (!last) Fail(L"Backup saved, but the scheduled run record could not be written.");
-        WriteLog(L"Saved " + zip.wstring() + (tree->warnings.empty() ? L"" :
-            L"\nSkipped " + std::to_wstring(tree->warnings.size()) + L" linked item(s)."));
+        LogOperation(L"Scheduled backup", L"Success", L"Saved " + zip.wstring() + (tree->warnings.empty() ? L"" :
+            L"\nSkipped " + std::to_wstring(tree->warnings.size()) + L" linked item(s)."), zip);
         return 0;
     } catch (const std::exception& error) {
-        try { WriteLog(Utf16(error.what())); } catch (const std::exception&) {}
+        try { LogOperation(L"Scheduled backup", L"Failure", Utf16(error.what()), zip); } catch (const std::exception&) {}
         return 1;
     }
 }
