@@ -22,7 +22,7 @@ enum Id {
     BackupPage = 100, RestorePage, ScanNow, ScanFolder, AddFolder, AddFile, Change, Remove, ScheduleButton,
     SelectAll, ClearAll, Run, Open, Original, NewLocation, Details, ZipList, TreeId, Destinations,
     ScheduleFolder, Frequency, Time, Copies, SaveTask, RemoveTask, RunTask, CloseDialog,
-    BrowseBackup, BackupPath, CancelTransfer, DeleteBackup, ShowLog, EmptyLog
+    BrowseBackup, BackupPath, CancelTransfer, DeleteBackup, ShowLog, EmptyLog, MoreMenu, Help, Releases, Support
 };
 
 std::wstring Text(HWND control) {
@@ -320,7 +320,7 @@ struct App {
         const std::pair<int, const wchar_t*> labels[] = {
             {BackupPage,L"&Backup"}, {RestorePage,L"&Restore"}, {ScanNow,L"Scan"}, {ScanFolder,L"Scan folder…"},
             {AddFolder,L"Add folder…"}, {AddFile,L"Add file…"}, {Change,L"Change path…"}, {Remove,L"Remove folder"},
-            {ShowLog,L"Log…"}, {ScheduleButton,L"Schedule…"}, {SelectAll,L"Select all"}, {ClearAll,L"Clear selection"}, {Run,L"Back up now…"},
+            {ShowLog,L"Log…"}, {ScheduleButton,L"Schedule…"}, {MoreMenu,L"More options"}, {SelectAll,L"Select all"}, {ClearAll,L"Clear selection"}, {Run,L"Back up now…"},
             {Open,L"Open ZIP…"}, {Original,L"Original location"},
             {NewLocation,L"New location…"}, {Details,L"Scan issues…"},
             {BrowseBackup,L"Browse…"}, {CancelTransfer,L"Cancel"}, {DeleteBackup,L"Delete backup…"}
@@ -340,10 +340,11 @@ struct App {
             MoveWindow(control, Px(x), Px(y), Px(w), Px(h), TRUE);
         };
         auto button = [&](int id, int x, int y, int w, int h = 34) { place(buttons.at(id), x, y, w, h); };
-        place(title, 108, 20, width - 350, 42);
-        place(sub, 110, 64, width - 352, 24);
-        button(ScheduleButton, width - 142, 36, 112, 38);
-        button(ShowLog, width - 230, 36, 80, 38);
+        place(title, 108, 20, width - 400, 42);
+        place(sub, 110, 64, width - 402, 24);
+        button(ShowLog, width - 280, 36, 80, 38);
+        button(ScheduleButton, width - 192, 36, 112, 38);
+        button(MoreMenu, width - 72, 36, 42, 38);
         button(BackupPage, 30, 101, 119, 38);
         button(RestorePage, 157, 101, 119, 38);
         int y = 159;
@@ -1136,6 +1137,41 @@ void App::Command(int id, int notification) {
         break;
     }
     case ScheduleButton: ShowSchedule(); break;
+    case MoreMenu: {
+        auto menu = CreatePopupMenu();
+        if (!menu) Fail(L"Could not open the RainBackup menu.");
+        AppendMenuW(menu, MF_STRING, Help, L"&Help");
+        AppendMenuW(menu, MF_STRING, Releases, L"&Releases");
+        AppendMenuW(menu, MF_STRING, Support, L"&Support");
+        RECT anchor{};
+        GetWindowRect(buttons.at(MoreMenu), &anchor);
+        const auto choice = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_NONOTIFY | TPM_RIGHTALIGN,
+            anchor.right, anchor.bottom, 0, window, nullptr);
+        DestroyMenu(menu);
+        if (choice) Command(choice, 0);
+        break;
+    }
+    case Releases:
+    case Support: {
+        const auto url = id == Releases ? L"https://github.com/jsmorley/RainBackup/releases" :
+            L"https://forum.rainmeter.net/viewtopic.php?p=246995#p246988";
+        if (reinterpret_cast<INT_PTR>(ShellExecuteW(window, L"open", url, nullptr, nullptr, SW_SHOWNORMAL)) <= 32) {
+            Fail(L"Could not open the page in the default browser.");
+        }
+        break;
+    }
+    case Help: {
+        std::wstring executable(32768, L'\0');
+        const DWORD length = GetModuleFileNameW(nullptr, executable.data(), static_cast<DWORD>(executable.size()));
+        if (!length || length >= executable.size()) Fail(L"Could not find the RainBackup installation folder.");
+        executable.resize(length);
+        const auto manual = fs::path(executable).parent_path() / L"RainBackup-Manual.txt";
+        if (!fs::is_regular_file(manual)) Fail(L"Could not find the RainBackup manual.\n\n" + manual.wstring());
+        if (reinterpret_cast<INT_PTR>(ShellExecuteW(window, L"open", manual.c_str(), nullptr, nullptr, SW_SHOWNORMAL)) <= 32) {
+            Fail(L"Could not open the RainBackup manual in the default text editor.");
+        }
+        break;
+    }
     case ShowLog: {
         ScheduleDialog dialog{*this, {}};
         dialog.showLog = true;
@@ -1246,10 +1282,24 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
             Box(row->hDC, r, app->Px(12), fill, primary ? p.accent : p.border);
             SetBkMode(row->hDC, TRANSPARENT);
             SetTextColor(row->hDC, primary ? p.onAccent : disabled ? p.quiet : p.text);
-            auto text = Text(row->hwndItem);
-            auto previous = SelectObject(row->hDC, id == Run ? app->section : app->regular);
-            DrawTextW(row->hDC, text.c_str(), -1, &r, DT_SINGLELINE | DT_CENTER | DT_VCENTER | DT_HIDEPREFIX);
-            SelectObject(row->hDC, previous);
+            if (id == MoreMenu) {
+                const int x = (r.left + r.right) / 2;
+                const int y = (r.top + r.bottom) / 2;
+                const int halfWidth = app->Px(8);
+                const int thickness = std::max(1, app->Px(2));
+                auto ink = CreateSolidBrush(disabled ? p.quiet : p.text);
+                for (int offset : {-5, 0, 5}) {
+                    const int top = y + app->Px(offset) - thickness / 2;
+                    RECT line{x - halfWidth, top, x + halfWidth, top + thickness};
+                    FillRect(row->hDC, &line, ink);
+                }
+                DeleteObject(ink);
+            } else {
+                auto text = Text(row->hwndItem);
+                auto previous = SelectObject(row->hDC, id == Run ? app->section : app->regular);
+                DrawTextW(row->hDC, text.c_str(), -1, &r, DT_SINGLELINE | DT_CENTER | DT_VCENTER | DT_HIDEPREFIX);
+                SelectObject(row->hDC, previous);
+            }
             if ((row->itemState & ODS_FOCUS) && !(row->itemState & ODS_NOFOCUSRECT)) {
                 InflateRect(&r, -3, -3);
                 DrawFocusRect(row->hDC, &r);
@@ -1401,7 +1451,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR arguments, int show) {
     wc.hIconSm = wc.hIcon;
     RegisterClassExW(&wc);
     UINT dpi = GetDpiForSystem();
-    auto window = CreateWindowExW(WS_EX_CONTROLPARENT, wc.lpszClassName, L"RainBackup",
+    auto window = CreateWindowExW(WS_EX_CONTROLPARENT, wc.lpszClassName, L"RainBackup " RAINBACKUP_VERSION,
         WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN, CW_USEDEFAULT, CW_USEDEFAULT,
         MulDiv(965, dpi, 96), MulDiv(790, dpi, 96), nullptr, nullptr, instance, &app);
     if (!window) { CoUninitialize(); return 1; }

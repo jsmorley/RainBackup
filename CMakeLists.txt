@@ -16,6 +16,7 @@ target_compile_definitions(backup PUBLIC UNICODE _UNICODE NOMINMAX WIN32_LEAN_AN
 target_link_libraries(backup PUBLIC zip shell32 ole32 oleaut32 advapi32 uuid taskschd)
 add_executable(RainBackup WIN32 src/Main.cpp src/RainmeterSession.cpp src/SetupSession.cpp src/RainBackup.rc)
 target_link_libraries(RainBackup PRIVATE backup comctl32 dwmapi uxtheme)
+target_compile_definitions(RainBackup PRIVATE RAINBACKUP_VERSION=L\"${PROJECT_VERSION}\")
 if(MSVC)
     target_link_options(RainBackup PRIVATE /MANIFEST:NO)
     foreach(target backup RainBackup)
