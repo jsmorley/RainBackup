@@ -8,7 +8,7 @@ Download the installer ZIP from [GitHub Releases](https://github.com/jsmorley/Ra
 
 - **Scan** looks for the installed Rainmeter and running portable copies. **Scan folder** searches a folder you choose for portable installations. RainBackup remembers the sources and checkbox selections.
 - Expand the tree to individual files. **Add folder** and **Add file** can include anything you consider part of your setup, such as your plugin SDK. Select a source to use **Change path**, **Remove folder**, or **Remove file**. Uncheck individual items inside a source to exclude them from backups.
-- Enter a destination and filename in **Backup ZIP**, or use **Browse**. **Back up now** previews the selected items and ZIP path before writing. Review scan notices before backing up. Selected OneDrive files may download on demand. If a selected file cannot be read, an existing ZIP stays intact.
+- Enter a destination in **Backup destination**, or use **Browse**. **Back up now** confirms the selected item count and folder. RainBackup names the ZIP using the local date and time when the backup starts. Review scan notices before backing up. Selected OneDrive files may download on demand. If a selected file cannot be read, an existing ZIP stays intact.
 
 ## Restore
 
@@ -21,7 +21,7 @@ Interactive backups and restores show the current path and percent complete. **C
 
 ## Scheduling
 
-**Schedule** sets a daily or Monday backup, a local time, a destination, and how many managed copies to keep. Windows Task Scheduler runs it under the signed-in account. A missed backup runs when Windows and the account become available. Several missed intervals produce one current snapshot. The oldest managed ZIPs are removed after a successful backup. Other ZIPs are left alone. The schedule and latest result are stored in the RainBackup folder under Local AppData.
+**Schedule** sets a daily or Monday backup, a local time, a destination, and how many managed copies to keep. Windows Task Scheduler runs it under the signed-in account. A missed backup runs when Windows and the account become available. Several missed intervals produce one current snapshot. The oldest managed ZIPs are removed after a successful backup. Other ZIPs are left alone. The schedule and latest result are stored in the RainBackup destination under Local AppData.
 
 Open **Log…** on the main window for dated backup and restore results. **Empty log** clears the history after confirmation.
 

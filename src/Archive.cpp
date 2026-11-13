@@ -326,7 +326,7 @@ void PreserveOwner(const fs::path& target, const fs::path& temporary) {
 }
 }
 
-void WriteZip(const Tree& tree, const fs::path& path, const Transfer& transfer) {
+void WriteZip(const Tree& tree, const fs::path& path, const Transfer& transfer, ZipDisposition disposition) {
     TransferProgress progress(transfer);
     progress.Begin(L"Measuring selected backup items…");
     CheckPath(path);
@@ -365,7 +365,9 @@ void WriteZip(const Tree& tree, const fs::path& path, const Transfer& transfer) 
     progress.Begin(L"Saving the finished ZIP…");
     CheckPath(path);
     progress.Check();
-    if (!MoveFileExW(temporary.path.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+    DWORD flags = MOVEFILE_WRITE_THROUGH;
+    if (disposition == ZipDisposition::ReplaceExisting) flags |= MOVEFILE_REPLACE_EXISTING;
+    if (!MoveFileExW(temporary.path.c_str(), path.c_str(), flags)) {
         FileError(L"Could not save the ZIP.", path, GetLastError());
     }
 }

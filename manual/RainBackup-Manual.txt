@@ -24,8 +24,8 @@ RainBackup remembers your sources and checkbox choices. Review Scan issues... if
 
 CREATE A BACKUP ZIP
 
-1. Enter a folder and filename in Backup ZIP, or click Browse.... RainBackup suggests a timestamped name. Choose a destination outside the selected source folders.
-2. Click Back up now... and review the selected item count and ZIP path. The prompt also tells you if an existing ZIP will be replaced. Click Yes to begin.
+1. Enter a destination in Backup destination, or click Browse.... Choose a destination outside the selected source folders.
+2. Click Back up now... and review the selected item count and destination folder. Click Yes to begin. RainBackup names the ZIP using the local date and time when the backup starts and shows the full ZIP path when it finishes.
 3. Watch the progress bar and current path. Click Cancel to discard the unfinished ZIP. If the operation is canceled or fails before the new archive is saved, any existing ZIP at that path stays in place.
 
 If the skins are in OneDrive, Windows may download selected online-only files as RainBackup reads them. If a file can't be read, check OneDrive's connection or use Always keep on this device in File Explorer, then try again.
@@ -57,7 +57,7 @@ SCHEDULE BACKUPS AND KEEP A SET NUMBER OF COPIES
 
 Windows Task Scheduler runs the backup under your signed-in account. When Windows and that account become available after a missed run, RainBackup makes one current backup for the missed interval or intervals. Each managed backup gets a timestamped filename. After a successful backup, RainBackup permanently deletes the oldest excess managed copies in that destination.
 
-Back up now... inside the Schedule dialog makes a managed backup immediately using the destination and retention you've entered. Back up now... on the main Backup screen saves the ZIP you named without pruning older copies.
+Back up now... inside the Schedule dialog makes a managed backup immediately using the destination and retention you've entered. Back up now... on the main Backup screen saves a new timestamped ZIP and keeps older copies.
 
 Click Remove schedule to stop future automatic runs and keep existing ZIPs.
 

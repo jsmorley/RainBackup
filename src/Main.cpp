@@ -39,20 +39,24 @@ void Message(HWND window, const std::wstring& message, UINT icon = MB_ICONINFORM
     MessageBoxW(window, message.c_str(), L"RainBackup", MB_OK | icon);
 }
 
-enum class Picker { Folder, Open, Save };
-std::wstring BackupFilename() {
+enum class Picker { Folder, Open };
+fs::path NewBackupPath(const fs::path& folder) {
     SYSTEMTIME now{};
     GetLocalTime(&now);
     wchar_t name[80]{};
     swprintf_s(name, L"RainBackup-%04u-%02u-%02u_%02u-%02u-%02u.zip",
         now.wYear, now.wMonth, now.wDay, now.wHour, now.wMinute, now.wSecond);
-    return name;
+    fs::path path = folder / name;
+    const auto stem = path.stem().wstring();
+    for (unsigned copy = 2; fs::exists(path); ++copy) {
+        path = folder / (stem + L"-" + std::to_wstring(copy) + L".zip");
+    }
+    return path;
 }
 
-fs::path Browse(HWND owner, Picker type, const fs::path& initial = {}, bool zipOnly = false,
-    const std::wstring& suggested = {}) {
+fs::path Browse(HWND owner, Picker type, const fs::path& initial = {}, bool zipOnly = false) {
     IFileDialog* dialog = nullptr;
-    HRESULT result = CoCreateInstance(type == Picker::Save ? CLSID_FileSaveDialog : CLSID_FileOpenDialog,
+    HRESULT result = CoCreateInstance(CLSID_FileOpenDialog,
         nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&dialog));
     if (FAILED(result)) Fail(L"Could not open the Windows file picker.");
     struct Release { IFileDialog* dialog; ~Release() { dialog->Release(); } } release{dialog};
@@ -66,10 +70,7 @@ fs::path Browse(HWND owner, Picker type, const fs::path& initial = {}, bool zipO
         dialog->SetFileTypes(1, &filter);
         dialog->SetDefaultExtension(L"zip");
     }
-    if (type == Picker::Save) {
-        dialog->SetFileName(suggested.empty() ? BackupFilename().c_str() : suggested.c_str());
-        dialog->SetOptions((options & ~FOS_OVERWRITEPROMPT) | FOS_FORCEFILESYSTEM | FOS_PATHMUSTEXIST);
-    }
+
     if (!initial.empty()) {
         IShellItem* item = nullptr;
         if (SUCCEEDED(SHCreateItemFromParsingName(initial.c_str(), nullptr, IID_PPV_ARGS(&item)))) {
@@ -297,10 +298,10 @@ struct App {
         percentLabel = Control(L"STATIC", L"", SS_RIGHT | SS_NOPREFIX);
         SendMessageW(progressBar, PBM_SETRANGE32, 0, 100);
         mode = Control(L"STATIC", L"", SS_NOPREFIX);
-        backupPathLabel = Control(L"STATIC", L"Backup ZIP", SS_NOPREFIX);
+        backupPathLabel = Control(L"STATIC", L"Backup destination", SS_NOPREFIX);
         lastFolder = LoadBackupFolder();
         if (lastFolder.empty()) lastFolder = KnownFolder(FOLDERID_Documents);
-        backupPath = Control(L"EDIT", (lastFolder / BackupFilename()).c_str(),
+        backupPath = Control(L"EDIT", lastFolder.c_str(),
             WS_TABSTOP | ES_AUTOHSCROLL, BackupPath);
         SendMessageW(backupPath, EM_SETLIMITTEXT, 32767, 0);
         tree = Control(WC_TREEVIEWW, L"", WS_TABSTOP | TVS_HASBUTTONS | TVS_HASLINES | TVS_LINESATROOT |
@@ -376,8 +377,8 @@ struct App {
         } else {
             place(detail, 30, lower + 7, width - 195, 25);
             button(Details, width - 149, lower + 2, 119, 30);
-            place(backupPathLabel, 30, lower + 47, 85, 25);
-            backupField = {Px(116), Px(lower + 43), Px(width - 143), Px(lower + 72)};
+            place(backupPathLabel, 30, lower + 47, 130, 25);
+            backupField = {Px(162), Px(lower + 43), Px(width - 143), Px(lower + 72)};
             HDC dc = GetDC(backupPath);
             auto previous = SelectObject(dc, regular);
             TEXTMETRICW metrics{};
@@ -756,27 +757,27 @@ struct App {
     }
 
     void RunBackup() {
-        fs::path path(Text(backupPath));
-        if (path.empty() || path.filename().empty()) Fail(L"Enter a backup ZIP path and filename, or click Browse.");
-        if (path.extension().empty()) path += L".zip";
-        if (!EqualPath(path.extension(), L".zip")) Fail(L"Use the .zip extension for the backup.");
-        CheckPath(path);
-        if (!fs::is_directory(path.parent_path())) Fail(L"Choose an existing backup folder.");
+        fs::path folder(Text(backupPath));
+        if (folder.empty()) Fail(L"Enter a backup folder, or click Browse.");
+        folder.make_preferred();
+        if (folder != folder.root_path() && folder.filename().empty()) folder = folder.parent_path();
+        CheckPath(folder);
+        if (!fs::is_directory(folder)) Fail(L"Choose an existing backup folder.");
         if (!Confirm(window, L"Create a backup ZIP with " + std::to_wstring(backup->root.checked) +
-            L" selected items?\n\n" + path.wstring() +
-            (fs::exists(path) ? L"\n\nThe existing ZIP will be replaced." : L"") +
+            L" selected items in this folder?\n\n" + folder.wstring() +
             (!backup->warnings.empty() ? L"\n\nSome source items were unavailable. See Scan issues for paths." : L"") +
             L"\n\nSelected online-only files may download from OneDrive.")) return;
-        Start(L"Creating backup…", [this, path](const Progress&, const Transfer& transfer) {
-            WriteZip(*backup, path, transfer);
-            return [this, path] {
+        Start(L"Creating backup…", [this, folder](const Progress&, const Transfer& transfer, fs::path& location) {
+            location = NewBackupPath(folder);
+            WriteZip(*backup, location, transfer, ZipDisposition::CreateNew);
+            return [this, path = location] {
                 lastFolder = path.parent_path();
                 notice = L"Backup saved";
-                SetWindowTextW(backupPath, (lastFolder / BackupFilename()).c_str());
+                SetWindowTextW(backupPath, lastFolder.c_str());
                 Message(window, L"Backup saved to\n" + path.wstring());
                 SaveBackupFolder(lastFolder);
             };
-        }, L"Backup", path);
+        }, L"Backup", folder);
     }
 
     void RunRestore() {
@@ -1113,8 +1114,7 @@ void App::Command(int id, int notification) {
     case Run: restorePage ? RunRestore() : RunBackup(); break;
     case BrowseBackup: {
         fs::path current(Text(backupPath));
-        auto path = Browse(window, Picker::Save, current.has_parent_path() ? current.parent_path() : lastFolder,
-            true, current.filename().wstring());
+        auto path = Browse(window, Picker::Folder, fs::is_directory(current) ? current : lastFolder);
         if (!path.empty()) SetWindowTextW(backupPath, path.c_str());
         break;
     }

@@ -50,6 +50,14 @@ int main() {
             backupProgress = percent;
         }});
         Require(backupProgress >= 98, "backup progress did not advance");
+        auto collision = workspace / L"Existing.zip";
+        bool collisionRejected = false;
+        try {
+            WriteZip(*tree, collision, {[&](const std::wstring& label, int) {
+                if (label.starts_with(L"Saving the finished ZIP")) Write(collision, "other backup");
+            }}, ZipDisposition::CreateNew);
+        } catch (const std::exception&) { collisionRejected = true; }
+        Require(collisionRejected && Read(collision) == "other backup", "a manual backup replaced a colliding file");
         auto zip = ReadZip(archive);
         Require(zip.originalLocations && zip.tree->root.checked == 5, "ZIP selection did not round-trip");
         auto targets = NewLocations(zip, workspace / L"New Account");
