@@ -1,0 +1,64 @@
+RAINBACKUP USER MANUAL
+
+RainBackup is a Windows x64 utility for backing up and restoring Rainmeter skins, settings, layouts, custom plugins, and any additional files or folders you choose. A single ZIP can hold files from more than one Rainmeter setup.
+
+INSTALL OR UPGRADE RAINBACKUP
+
+1. Run RainBackup-Setup.exe. The default destination is C:\Program Files\RainBackup. Use Browse to choose a different folder.
+2. Choose whether to Create Start menu shortcut for the installing account. Setup checks this option for a new installation and clears it when it detects an existing one. Leave it cleared during an upgrade if you've moved your shortcut and want to keep using it.
+3. Review the installation path and shortcut choice, then confirm. On the final screen, leave Launch RainBackup checked to open the program when you click Finish.
+
+The plain-text manual is installed as RainBackup-Manual.txt in the same folder as RainBackup.exe.
+
+CHOOSE WHAT TO BACK UP
+
+1. Open Backup and click Scan. RainBackup looks for the installed copy and any running portable copies it can identify. It reads Rainmeter's configured skins path and shows the skins separately from Settings & Plugins.
+2. For a portable copy elsewhere, click Scan folder... and choose the installation folder or a parent folder to search. Repeat for other portable installations as needed.
+3. Expand the tree to see individual folders and files. Check or uncheck a folder to apply the choice to everything under it. A dash in a checkbox means only some of its contents are selected. Use Select all or Clear selection to change the entire tree.
+4. Use Add folder... or Add file... for anything else you want to include. For example, add C:\rainmeter-plugin-sdk if you want the SDK in the same archive.
+5. To replace a configured path, select the source and click Change path.... To take an entire source off the list, select its top-level folder or file and click Remove folder or Remove file. The Yes/No prompt shows exactly which path will be removed from future backups. Your files and existing ZIPs stay in place. To skip a nested folder or file, uncheck it in the tree.
+
+RainBackup remembers your sources and checkbox choices. Review Scan details... if the scan reports unavailable paths or skipped links. Use Scan before a manual backup if you've added or removed files since the tree was loaded.
+
+CREATE A BACKUP ZIP
+
+1. Enter a folder and filename in Backup ZIP, or click Browse.... RainBackup suggests a timestamped name. Choose a destination outside the selected source folders.
+2. Click Back up now... and review the selected item count and ZIP path. The prompt also tells you if an existing ZIP will be replaced. Click Yes to begin.
+3. Watch the progress bar and current path. Click Cancel to discard the unfinished ZIP. If the operation is canceled or fails before the new archive is saved, any existing ZIP at that path stays in place.
+
+If the skins are in OneDrive, Windows may download selected online-only files as RainBackup reads them. If a file can't be read, check OneDrive's connection or use Always keep on this device in File Explorer, then try again.
+
+RESTORE A BACKUP
+
+1. Install Rainmeter on the destination PC before restoring. For a portable copy that RainBackup hasn't detected, use Backup > Scan folder... to register it.
+2. Open Restore and click Open ZIP.... Once a ZIP is open, use the dropdown to switch between ZIPs in the same folder.
+3. Expand the archive tree and check the items to restore. Click Select all to restore the entire backup.
+4. Choose a destination. Review the path for each selected source in the destination list.
+5. Click Restore selected.... Review the destinations and the number of existing files that will be overwritten, then click Yes. RainBackup closes running Rainmeter instances before writing and reopens those instances afterward.
+
+CHOOSE A RESTORE DESTINATION
+
+- Original location uses the exact paths stored in the backup. Use it when the same folders are still correct.
+- Use this PC's folders maps matching Rainmeter sources to the paths RainBackup knows on the destination PC. This is useful when the Windows account name changed or Documents is now in OneDrive. Check the destination list and set any unmatched paths manually.
+- New location... places the backup sources under a folder you choose. Use this to extract a copy for inspection or to lay out the files in a different location.
+- Change destination... lets you choose a folder for the selected source in the destination list. Use it for extra files and folders or for a portable setup that has moved.
+
+When a relocated restore includes Rainmeter.ini and a skins destination is mapped for the same setup, RainBackup updates SkinPath in the restored INI. New files inherit permissions from their destination folder. For overwrites, RainBackup attempts to preserve the existing file's owner and access controls and stops if Windows prevents that.
+
+Cancel stops the restore before the next file is committed. Files already restored stay in place, and RainBackup reports how many it completed. Rainmeter restarts if RainBackup closed it.
+
+SCHEDULE BACKUPS AND KEEP A SET NUMBER OF COPIES
+
+1. Set up your sources and selection on Backup, then click Schedule... at the top right.
+2. Choose the Backup destination, set Frequency to Daily or Weekly on Monday, and enter a local time in 24-hour format, such as 18:00.
+3. Set Copies to keep to a number from 1 to 999. Click Save schedule and confirm.
+
+Windows Task Scheduler runs the backup under your signed-in account. When Windows and that account become available after a missed run, RainBackup makes one current backup for the missed interval or intervals. Each managed backup gets a timestamped filename. After a successful backup, RainBackup permanently deletes the oldest excess managed copies in that destination.
+
+Back up now... inside the Schedule dialog makes a managed backup immediately using the destination and retention you've entered. Back up now... on the main Backup screen saves the ZIP you named without pruning older copies.
+
+Click Remove schedule to stop future automatic runs and keep existing ZIPs. To check the latest scheduled run, open %LOCALAPPDATA%\RainBackup\scheduled.log.
+
+DELETE AN OLD BACKUP
+
+On Restore, select a ZIP in the dropdown and click Delete backup.... If no ZIP is selected, the button opens a file picker. Verify the full path in the Yes/No prompt. Clicking Yes permanently deletes that ZIP.
