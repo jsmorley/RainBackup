@@ -30,7 +30,7 @@ RainBackup remembers your sources and checkbox choices. Review Scan issues... if
 
 CREATE A BACKUP ZIP
 
-1. Select a named backup. Check the destination shown on the Backup screen. Use Edit to change it.
+1. Select a named backup. Click the up arrow beside Backup destination to open the folder in Windows Explorer. Use Edit to change the destination.
 2. Click Back up now... and review the confirmation. RainBackup names the ZIP using the backup name and local time, for example RainBackup-Skins-2026-11-14-18-00-00.zip, and shows the full path when it finishes.
 3. Watch the progress bar and current path. Click Cancel to discard the unfinished ZIP. If the operation is canceled or fails before the new archive is saved, any existing ZIP at that path stays in place.
 

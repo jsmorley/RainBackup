@@ -24,7 +24,8 @@ enum Id {
     SelectAll, ClearAll, Run, Open, Original, NewLocation, Details, ZipList, TreeId, Destinations,
     ScheduleFolder, Frequency, Time, Copies, SaveTask, RemoveTask, CloseDialog,
     BackupPath, CancelTransfer, DeleteBackup, ShowLog, EmptyLog, MoreMenu, Help, Releases, Support,
-    ScheduleSavedFolders, ToggleTooltips, ToggleDarkMode, ProfileChoice, NewProfile, Time12Hour, Time24Hour
+    ScheduleSavedFolders, ToggleTooltips, ToggleDarkMode, ProfileChoice, NewProfile, Time12Hour, Time24Hour,
+    OpenBackupDestination
 };
 
 std::wstring DisplayTime(std::wstring_view time, bool use24Hour) {
@@ -89,6 +90,7 @@ const wchar_t* ButtonTip(int id, bool restore) {
     case ClearAll: return L"Uncheck everything in the tree.";
     case Run: return restore ? L"Review the selected files and restore destinations." : L"Review and create a new backup ZIP.";
     case Open: return L"Browse for a backup ZIP, including in saved destinations.";
+    case OpenBackupDestination: return L"Open the backup destination in Windows Explorer.";
     case Original: return L"Restore to the paths recorded in the ZIP.";
     case NewLocation: return L"Choose one folder for the restored files.";
     case Details: return L"Show unreadable paths and skipped links from the scan.";
@@ -450,7 +452,8 @@ struct App {
             {ShowLog,L"Log"}, {MoreMenu,L"More options"}, {SelectAll,L"Select all"}, {ClearAll,L"Clear selection"}, {Run,L"Back up now…"},
             {Open,L"Open ZIP"}, {Original,L"Original location"},
             {NewLocation,L"New location"}, {Details,L"Scan issues…"},
-            {NewProfile,L"New"}, {ScheduleButton,L"Edit"}, {CancelTransfer,L"Cancel"}, {DeleteBackup,L"Delete ZIP"}
+            {NewProfile,L"New"}, {ScheduleButton,L"Edit"}, {CancelTransfer,L"Cancel"}, {DeleteBackup,L"Delete ZIP"},
+            {OpenBackupDestination,L"↑"}
         };
         showTooltips = LoadButtonTooltips();
         darkMode = LoadDarkMode();
@@ -516,8 +519,9 @@ struct App {
         } else {
             place(detail, 30, lower + 7, width - 195, 25);
             button(Details, width - 149, lower + 2, 119, 30);
-            place(backupPathLabel, 30, lower + 47, 130, 25);
-            backupField = {Px(162), Px(lower + 43), Px(width - 30), Px(lower + 72)};
+            button(OpenBackupDestination, 30, lower + 43, 27, 29);
+            place(backupPathLabel, 64, lower + 47, 130, 25);
+            backupField = {Px(196), Px(lower + 43), Px(width - 30), Px(lower + 72)};
             HDC dc = GetDC(backupPath);
             auto previous = SelectObject(dc, regular);
             TEXTMETRICW metrics{};
@@ -542,7 +546,8 @@ struct App {
     void Refresh() {
         if (!tree) return;
         const bool has = Active() && !Active()->root.children.empty();
-        for (auto id : {ScanNow, ScanFolder, AddFolder, AddFile, Change, Remove, Details, NewProfile, ScheduleButton}) {
+        for (auto id : {ScanNow, ScanFolder, AddFolder, AddFile, Change, Remove, Details, NewProfile,
+            ScheduleButton, OpenBackupDestination}) {
             ShowWindow(buttons[id], restorePage ? SW_HIDE : SW_SHOW);
         }
         for (auto id : {Open, Original, NewLocation, DeleteBackup}) {
@@ -570,6 +575,7 @@ struct App {
             if (id == ScheduleButton || id == ScanNow || id == ScanFolder || id == AddFolder || id == AddFile) {
                 enabled &= hasProfile;
             }
+            if (id == OpenBackupDestination) enabled &= hasProfile && !profiles.at(activeProfile).schedule.folder.empty();
             if (id == CancelTransfer) enabled = transferring && !stopTransfer.stop_requested();
             if (id == SelectAll || id == ClearAll) enabled &= has;
             if (id == Run) enabled &= has && Active()->root.checked != 0;
@@ -1492,6 +1498,16 @@ void App::Command(int id, int notification) {
         break;
     }
     case ScheduleButton: EditProfile(false); break;
+    case OpenBackupDestination: {
+        if (restorePage || profiles.empty()) break;
+        const auto& folder = profiles.at(activeProfile).schedule.folder;
+        std::error_code error;
+        if (!fs::is_directory(folder, error) ||
+            reinterpret_cast<INT_PTR>(ShellExecuteW(window, L"explore", folder.c_str(), nullptr, nullptr, SW_SHOWNORMAL)) <= 32) {
+            Fail(L"Could not open the backup destination in Windows Explorer.\n\n" + folder.wstring());
+        }
+        break;
+    }
     case MoreMenu: {
         auto menu = CreatePopupMenu();
         if (!menu) Fail(L"Could not open the RainBackup menu.");
