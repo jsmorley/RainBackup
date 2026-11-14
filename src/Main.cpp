@@ -411,7 +411,7 @@ struct App {
             const int fieldHeight = static_cast<int>(SendMessageW(profileChoice, CB_GETITEMHEIGHT, static_cast<WPARAM>(-1), 0));
             if (GetWindowRect(profileChoice, &bounds) && fieldHeight > 0) {
                 const int borderHeight = bounds.bottom - bounds.top - fieldHeight;
-                ComboBox_SetItemHeight(profileChoice, -1, Px(ProfileRowHeight) - borderHeight - 1);
+                ComboBox_SetItemHeight(profileChoice, -1, Px(ProfileRowHeight) - borderHeight);
             }
             ComboBox_SetItemHeight(profileChoice, 0, Px(28));
         }
