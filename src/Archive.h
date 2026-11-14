@@ -17,7 +17,8 @@ struct Transfer {
 
 enum class ZipDisposition { ReplaceExisting, CreateNew };
 void WriteZip(const Tree& tree, const fs::path& zip, const Transfer& transfer = {},
-    ZipDisposition disposition = ZipDisposition::ReplaceExisting);
+    ZipDisposition disposition = ZipDisposition::ReplaceExisting, std::string_view comment = {});
+std::string ReadZipComment(const fs::path& path);
 OpenZip ReadZip(const fs::path& path);
 std::vector<fs::path> NewLocations(const OpenZip& zip, const fs::path& folder);
 struct RestorePlan {

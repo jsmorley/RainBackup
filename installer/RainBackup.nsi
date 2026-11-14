@@ -8,11 +8,11 @@ Unicode True
 !endif
 
 Name "RainBackup"
-VIProductVersion "1.0.0.0"
+VIProductVersion "2.0.0.0"
 VIAddVersionKey /LANG=1033 "ProductName" "RainBackup"
-VIAddVersionKey /LANG=1033 "ProductVersion" "1.0.0"
+VIAddVersionKey /LANG=1033 "ProductVersion" "2.0.0"
 VIAddVersionKey /LANG=1033 "FileDescription" "RainBackup Setup"
-VIAddVersionKey /LANG=1033 "FileVersion" "1.0.0"
+VIAddVersionKey /LANG=1033 "FileVersion" "2.0.0"
 VIAddVersionKey /LANG=1033 "LegalCopyright" "Copyright Jeffrey Morley"
 OutFile "..\dist\RainBackup-Setup.exe"
 InstallDir "$PROGRAMFILES64\RainBackup"
@@ -88,7 +88,7 @@ installed:
     WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\RainBackup" "DisplayName" "RainBackup"
     WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\RainBackup" "UninstallString" '$\"$INSTDIR\Uninstall.exe$\"'
     WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\RainBackup" "DisplayIcon" "$INSTDIR\RainBackup.exe"
-    WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\RainBackup" "DisplayVersion" "1.0.0"
+    WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\RainBackup" "DisplayVersion" "2.0.0"
     WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\RainBackup" "NoModify" 1
     WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\RainBackup" "NoRepair" 1
 SectionEnd

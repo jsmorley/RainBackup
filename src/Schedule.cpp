@@ -11,15 +11,33 @@
 
 namespace rb {
 namespace {
-fs::path SchedulePath(const wchar_t* file) {
+fs::path SchedulePath(std::wstring_view file) {
     return fs::path(KnownFolder(FOLDERID_LocalAppData)) / L"RainBackup" / file;
 }
 
-std::wstring TaskName() {
+bool ValidScheduleId(std::wstring_view id) {
+    return id.size() == 32 && id.find_first_not_of(L"0123456789abcdefABCDEF") == id.npos;
+}
+
+std::wstring ScheduleSuffix(std::wstring_view id) {
+    if (id.empty()) return {};
+    if (!ValidScheduleId(id)) Fail(L"Invalid backup schedule ID.");
+    return L"-" + std::wstring(id);
+}
+
+fs::path ScheduleFile(std::wstring_view id) {
+    return SchedulePath(L"schedule" + ScheduleSuffix(id) + L".txt");
+}
+
+fs::path ProfileFile(std::wstring_view id) {
+    return SchedulePath(L"profiles") / (L"backup" + ScheduleSuffix(id) + L".txt");
+}
+
+std::wstring TaskName(std::wstring_view id) {
     auto profile = KnownFolder(FOLDERID_Profile);
     uint64_t hash = 14695981039346656037ULL;
     for (wchar_t c : profile) hash = (hash ^ c) * 1099511628211ULL;
-    return L"RainBackup-" + std::to_wstring(hash);
+    return L"RainBackup-" + std::to_wstring(hash) + ScheduleSuffix(id);
 }
 
 using Microsoft::WRL::ComPtr;
@@ -99,8 +117,9 @@ uint64_t Due(const Schedule& schedule) {
     return due;
 }
 
-bool IsManaged(std::wstring_view name) {
-    if (name.size() != 35 || !name.starts_with(L"RainBackup-") || !name.ends_with(L".zip")) return false;
+bool IsManaged(std::wstring_view name, std::wstring_view suffix) {
+    if (name.size() != 35 + suffix.size() || !name.starts_with(L"RainBackup-") ||
+        !name.ends_with(L".zip") || name.substr(31, suffix.size()) != suffix) return false;
     for (size_t i = 11; i < 31; ++i) {
         if (i == 19 || i == 26) {
             if (name[i] != L'-') return false;
@@ -211,9 +230,10 @@ void EmptyOperationLog() {
     if (!log) Fail(L"Could not empty the operation log.");
 }
 
-Schedule LoadSchedule() {
-    std::ifstream input(SchedulePath(L"schedule.txt"), std::ios::binary);
+static Schedule LoadSchedule(std::wstring_view id) {
+    std::ifstream input(ScheduleFile(id), std::ios::binary);
     Schedule schedule;
+    schedule.id = id;
     if (input) {
         std::string time, folder;
         if (!(input >> schedule.copies >> schedule.weekly >> std::quoted(time) >> std::quoted(folder))) {
@@ -223,6 +243,120 @@ Schedule LoadSchedule() {
         schedule.folder = Utf16(folder);
     }
     return schedule;
+}
+
+std::wstring NewScheduleId() {
+    GUID guid{};
+    wchar_t text[40]{};
+    if (FAILED(CoCreateGuid(&guid)) || !StringFromGUID2(guid, text, 40)) Fail(L"Could not create a schedule ID.");
+    std::wstring id;
+    for (wchar_t ch : std::wstring_view(text)) {
+        if (ch != L'{' && ch != L'}' && ch != L'-') id += ch;
+    }
+    return id;
+}
+
+static std::vector<Schedule> LoadSchedules() {
+    std::vector<Schedule> result;
+    auto legacy = LoadSchedule({});
+    if (!legacy.folder.empty()) result.push_back(std::move(legacy));
+    auto folder = SchedulePath(L"");
+    if (!fs::exists(folder)) return result;
+    for (const auto& item : fs::directory_iterator(folder)) {
+        const auto name = item.path().filename().wstring();
+        if (name.size() != 45 || !name.starts_with(L"schedule-") || !name.ends_with(L".txt")) continue;
+        const auto id = std::wstring_view(name).substr(9, 32);
+        if (ValidScheduleId(id)) result.push_back(LoadSchedule(id));
+    }
+    std::sort(result.begin(), result.end(), [](const auto& a, const auto& b) { return a.id < b.id; });
+    return result;
+}
+
+static std::optional<BackupProfile> ReadProfile(std::wstring_view id) {
+    std::ifstream input(ProfileFile(id), std::ios::binary);
+    if (!input) {
+        if (fs::exists(ProfileFile(id))) Fail(L"Could not read the backup profile.");
+        return std::nullopt;
+    }
+    BackupProfile profile;
+    profile.schedule.id = id;
+    std::string version, name, folder, time, sources;
+    size_t count = 0;
+    if (!std::getline(input, version) || version != "RainBackup profile 1" ||
+        !(input >> std::quoted(name) >> std::quoted(folder) >> profile.automatic >> profile.schedule.weekly
+            >> std::quoted(time) >> profile.schedule.copies >> std::quoted(sources) >> count) ||
+        name.empty() || count > 1000000) Fail(L"Invalid saved backup profile.");
+    profile.name = Utf16(name);
+    profile.schedule.folder = Utf16(folder);
+    profile.schedule.time = Utf16(time);
+    profile.sources = DecodeSources(sources);
+    for (size_t i = 0; i < count; ++i) {
+        std::string path;
+        if (!(input >> std::quoted(path))) Fail(L"Invalid backup exclusions.");
+        profile.excluded.emplace_back(Utf16(path));
+    }
+    return profile;
+}
+
+void SaveBackupProfile(const BackupProfile& profile) {
+    const auto& schedule = profile.schedule;
+    const auto path = ProfileFile(schedule.id);
+    fs::create_directories(path.parent_path());
+    const auto temporary = path.parent_path() / (NewScheduleId() + L".tmp");
+    std::ofstream output(temporary, std::ios::binary);
+    output << "RainBackup profile 1\n" << std::quoted(Utf8(profile.name)) << ' '
+        << std::quoted(Utf8(schedule.folder.native())) << ' ' << profile.automatic << ' ' << schedule.weekly
+        << ' ' << std::quoted(Utf8(schedule.time)) << ' ' << schedule.copies << '\n'
+        << std::quoted(EncodeSources(profile.sources)) << '\n' << profile.excluded.size() << '\n';
+    for (const auto& excluded : profile.excluded) output << std::quoted(Utf8(excluded.native())) << '\n';
+    output.close();
+    if (!output || !MoveFileExW(temporary.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+        DeleteFileW(temporary.c_str());
+        Fail(L"Could not save the backup profile.");
+    }
+}
+
+std::vector<BackupProfile> LoadBackupProfiles(const fs::path& defaultFolder) {
+    const auto folder = ProfileFile({}).parent_path();
+    const auto migrated = folder / L"imported";
+    if (!fs::exists(migrated)) {
+        const auto sources = fs::exists(SchedulePath(L"sources.txt")) ? LoadSources() : Scan();
+        const auto excluded = LoadIgnored();
+        constexpr auto defaultId = L"00000000000000000000000000000001";
+        if (!ReadProfile(defaultId)) {
+            BackupProfile manual{L"Rainmeter backup", {}, false, sources, excluded};
+            manual.schedule.id = defaultId;
+            manual.schedule.folder = defaultFolder;
+            SaveBackupProfile(manual);
+        }
+        size_t number = 0;
+        for (const auto& schedule : LoadSchedules()) {
+            ++number;
+            if (ReadProfile(schedule.id)) continue;
+            auto name = std::wstring(L"Scheduled backup ") + std::to_wstring(number);
+            SaveBackupProfile({std::move(name), schedule, true, sources, excluded});
+        }
+        std::ofstream marker(migrated);
+        if (!marker) Fail(L"Could not finish importing existing backup settings.");
+    }
+    std::vector<BackupProfile> result;
+    if (auto legacy = ReadProfile({})) result.push_back(std::move(*legacy));
+    for (const auto& item : fs::directory_iterator(folder)) {
+        const auto name = item.path().filename().wstring();
+        if (name.size() != 43 || !name.starts_with(L"backup-") || !name.ends_with(L".txt")) continue;
+        const auto id = std::wstring_view(name).substr(7, 32);
+        if (ValidScheduleId(id)) {
+            if (auto profile = ReadProfile(id)) result.push_back(std::move(*profile));
+        }
+    }
+    std::sort(result.begin(), result.end(), [](const auto& a, const auto& b) { return a.name < b.name; });
+    return result;
+}
+
+void DeleteBackupProfile(std::wstring_view id) {
+    std::error_code error;
+    fs::remove(ProfileFile(id), error);
+    if (error) Fail(L"Could not remove the backup profile.");
 }
 
 void SaveSchedule(const Schedule& schedule) {
@@ -235,7 +369,7 @@ void SaveSchedule(const Schedule& schedule) {
         !digit(time[3]) || !digit(time[4]) || time.substr(0, 2) > L"23" || time.substr(3, 2) > L"59") {
         Fail(L"Enter a 24-hour time such as 18:00.");
     }
-    auto path = SchedulePath(L"schedule.txt");
+    auto path = ScheduleFile(schedule.id);
     fs::create_directories(path.parent_path());
     auto temporary = path;
     temporary += L".tmp";
@@ -266,27 +400,32 @@ void SaveSchedule(const Schedule& schedule) {
         L"<Settings><MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy><DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>"
         L"<StopIfGoingOnBatteries>false</StopIfGoingOnBatteries><StartWhenAvailable>true</StartWhenAvailable></Settings>"
         L"<Actions Context=\"User\"><Exec><Command>" + Xml(executable) +
-        L"</Command><Arguments>--scheduled</Arguments></Exec></Actions></Task>";
+        L"</Command><Arguments>--scheduled" + (schedule.id.empty() ? L"" : L" " + schedule.id) +
+        L"</Arguments></Exec></Actions></Task>";
     auto taskFolder = TaskFolder();
     ComPtr<IRegisteredTask> registered;
     BString user(sid.c_str());
     VARIANT account{}, empty{};
     account.vt = VT_BSTR;
     account.bstrVal = user.value;
-    TaskCheck(taskFolder->RegisterTask(BString(TaskName().c_str()), BString(task.c_str()),
+    TaskCheck(taskFolder->RegisterTask(BString(TaskName(schedule.id).c_str()), BString(task.c_str()),
         TASK_CREATE_OR_UPDATE, account, empty, TASK_LOGON_INTERACTIVE_TOKEN, empty, &registered));
     if (!MoveFileExW(temporary.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
         Fail(L"Could not save the backup schedule settings.");
     }
 }
 
-void DeleteSchedule() {
+void DeleteSchedule(std::wstring_view id) {
     auto folder = TaskFolder();
-    HRESULT result = folder->DeleteTask(BString(TaskName().c_str()), 0);
+    HRESULT result = folder->DeleteTask(BString(TaskName(id).c_str()), 0);
     if (result != HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND)) TaskCheck(result);
     std::error_code error;
-    fs::remove(SchedulePath(L"schedule.txt"), error);
+    fs::remove(ScheduleFile(id), error);
     if (error) Fail(L"Could not remove the saved backup schedule.");
+}
+
+void DeleteAllSchedules() {
+    for (const auto& schedule : LoadSchedules()) DeleteSchedule(schedule.id);
 }
 
 void ApplyIgnored(Tree& tree, const std::vector<fs::path>& ignored) {
@@ -302,7 +441,27 @@ void ApplyIgnored(Tree& tree, const std::vector<fs::path>& ignored) {
     tree.root.Count();
 }
 
-fs::path SaveManagedBackup(const Tree& tree, const Schedule& schedule, const Transfer& transfer) {
+bool IsProfileArchive(const fs::path& path, std::wstring_view id) {
+    const auto name = path.filename().wstring();
+    if (IsManaged(name, ScheduleSuffix(id))) return true;
+    if (name.starts_with(L"RainBackup-") && name.ends_with(L".zip") &&
+        ReadZipComment(path) == "RainBackup profile:" + Utf8(id)) return true;
+    // Manual backups from before profiles belonged to the single default backup.
+    if (id != L"00000000000000000000000000000001" || name.size() < 34 ||
+        !name.starts_with(L"RainBackup-") || !name.ends_with(L".zip")) return false;
+    constexpr std::wstring_view stamp = L"0000-00-00_00-00-00";
+    const auto date = std::wstring_view(name).substr(11, stamp.size());
+    for (size_t i = 0; i < stamp.size(); ++i) {
+        if (stamp[i] == L'0' ? (date[i] < L'0' || date[i] > L'9') : date[i] != stamp[i]) return false;
+    }
+    auto suffix = std::wstring_view(name).substr(30, name.size() - 34);
+    if (suffix.empty()) return true;
+    return suffix.size() > 1 && suffix.front() == L'-' &&
+        suffix.substr(1).find_first_not_of(L"0123456789") == suffix.npos;
+}
+
+fs::path SaveManagedBackup(const Tree& tree, const Schedule& schedule, const Transfer& transfer, bool retain,
+    std::wstring_view name) {
     if (schedule.copies < 1 || schedule.copies > 999) Fail(L"Invalid number of backup copies.");
     CheckPath(schedule.folder);
     if (!fs::is_directory(schedule.folder)) Fail(L"The backup folder is unavailable.");
@@ -313,31 +472,47 @@ fs::path SaveManagedBackup(const Tree& tree, const Schedule& schedule, const Tra
         bool owned = false;
         ~Release() { if (owned) ReleaseMutex(mutex); CloseHandle(mutex); }
     } lock{mutex};
-    auto wait = WaitForSingleObject(mutex, 0);
-    if (wait != WAIT_OBJECT_0 && wait != WAIT_ABANDONED) Fail(L"A managed backup is already running.");
+    DWORD wait;
+    do {
+        if (transfer.stop.stop_requested()) throw Cancelled("Backup canceled.");
+        wait = WaitForSingleObject(mutex, 250);
+        if (wait == WAIT_TIMEOUT && transfer.report) transfer.report(L"Waiting for another backup to finish…", 0);
+    } while (wait == WAIT_TIMEOUT);
+    if (wait != WAIT_OBJECT_0 && wait != WAIT_ABANDONED) Fail(L"Could not coordinate the scheduled backup.");
     lock.owned = true;
 
     SYSTEMTIME now{};
-    GetSystemTime(&now);
-    wchar_t filename[64]{};
-    swprintf_s(filename, L"RainBackup-%04u%02u%02u-%02u%02u%02u-%04u.zip",
-        now.wYear, now.wMonth, now.wDay, now.wHour, now.wMinute, now.wSecond, now.wMilliseconds);
-    auto zip = schedule.folder / filename;
-    if (fs::exists(zip)) Fail(L"A backup with the same timestamp already exists.");
-    WriteZip(tree, zip, transfer);
+    GetLocalTime(&now);
+    wchar_t timestamp[32]{};
+    swprintf_s(timestamp, L"%04u-%02u-%02u-%02u-%02u-%02u",
+        now.wYear, now.wMonth, now.wDay, now.wHour, now.wMinute, now.wSecond);
+    std::wstring safeName(name);
+    for (auto& ch : safeName) {
+        if (ch < 32 || wcschr(L"<>:\"/\\|?*", ch)) ch = L'-';
+    }
+    const auto stem = L"RainBackup-" + safeName + L"-" + timestamp;
+    auto zip = schedule.folder / (stem + L".zip");
+    for (unsigned copy = 2; fs::exists(zip); ++copy) {
+        zip = schedule.folder / (stem + L"-" + std::to_wstring(copy) + L".zip");
+    }
+    const auto suffix = ScheduleSuffix(schedule.id);
+    WriteZip(tree, zip, transfer, ZipDisposition::CreateNew, "RainBackup profile:" + Utf8(schedule.id));
+    if (!retain) return zip;
 
-    std::vector<fs::path> backups;
+    std::vector<std::pair<fs::file_time_type, fs::path>> backups;
     for (const auto& item : fs::directory_iterator(schedule.folder)) {
-        if (!IsManaged(item.path().filename().native()) || IsReparse(item.path()) || !item.is_regular_file()) continue;
+        if (!EqualPath(item.path().extension(), L".zip") || IsReparse(item.path()) || !item.is_regular_file()) continue;
+        if (!IsManaged(item.path().filename().native(), suffix) &&
+            ReadZipComment(item.path()) != "RainBackup profile:" + Utf8(schedule.id)) continue;
         try {
             auto archive = ReadZip(item.path());
-            if (archive.originalLocations) backups.push_back(item.path());
+            if (archive.originalLocations) backups.emplace_back(item.last_write_time(), item.path());
         } catch (const std::exception&) {
         }
     }
     std::sort(backups.begin(), backups.end());
     size_t remaining = backups.size();
-    for (const auto& path : backups) {
+    for (const auto& [modified, path] : backups) {
         if (remaining <= schedule.copies) break;
         if (EqualPath(path, zip)) continue;
         if (!DeleteFileW(path.c_str())) Fail(L"Backup saved, but could not remove an older copy:\n" + path.wstring());
@@ -346,13 +521,19 @@ fs::path SaveManagedBackup(const Tree& tree, const Schedule& schedule, const Tra
     return zip;
 }
 
-int RunScheduled(bool catchUp) {
+int RunScheduled(bool catchUp, std::wstring_view id) {
     fs::path zip;
+    fs::path destination;
+    std::wstring backupName;
     try {
-        auto schedule = LoadSchedule();
+        const auto profile = ReadProfile(id);
+        if (profile && !profile->automatic) return 0;
+        if (profile) backupName = profile->name + L"\n";
+        auto schedule = profile ? profile->schedule : LoadSchedule(id);
         if (schedule.folder.empty()) return 0;
+        destination = schedule.folder;
         auto due = Due(schedule);
-        auto lastPath = SchedulePath(L"last-run.txt");
+        auto lastPath = SchedulePath(L"last-run" + ScheduleSuffix(id) + L".txt");
         if (catchUp) {
             std::ifstream previous(lastPath);
             uint64_t last = 0;
@@ -362,20 +543,21 @@ int RunScheduled(bool catchUp) {
                 last >= due && weekly == schedule.weekly && time == Utf8(schedule.time) &&
                 EqualPath(Utf16(folder), schedule.folder)) return 0;
         }
-        auto tree = Build(LoadSources());
-        ApplyIgnored(*tree, LoadIgnored());
+        auto tree = Build(profile ? profile->sources : LoadSources());
+        ApplyIgnored(*tree, profile ? profile->excluded : LoadIgnored());
         if (tree->incomplete) Fail(L"Backup stopped because a source item could not be read. Review Scan issues in RainBackup.");
-        zip = SaveManagedBackup(*tree, schedule);
+        zip = SaveManagedBackup(*tree, schedule, {}, true, profile ? profile->name : L"Backup");
         std::ofstream last(lastPath, std::ios::trunc);
         last << due << ' ' << schedule.weekly << ' ' << std::quoted(Utf8(schedule.time))
             << ' ' << std::quoted(Utf8(schedule.folder.native())) << '\n';
         last.close();
         if (!last) Fail(L"Backup saved, but the scheduled run record could not be written.");
-        LogOperation(L"Scheduled backup", L"Success", L"Saved " + zip.wstring() + (tree->warnings.empty() ? L"" :
+        LogOperation(L"Scheduled backup", L"Success", backupName + L"Saved " + zip.wstring() + (tree->warnings.empty() ? L"" :
             L"\nSkipped " + std::to_wstring(tree->warnings.size()) + L" linked item(s)."), zip);
         return 0;
     } catch (const std::exception& error) {
-        try { LogOperation(L"Scheduled backup", L"Failure", Utf16(error.what()), zip); } catch (const std::exception&) {}
+        try { LogOperation(L"Scheduled backup", L"Failure", backupName + destination.wstring() + L"\n" + Utf16(error.what()), zip); }
+        catch (const std::exception&) {}
         return 1;
     }
 }

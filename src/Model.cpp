@@ -405,10 +405,6 @@ std::vector<Source> LoadSources() {
     return DecodeSources(data);
 }
 
-void SaveSources(const std::vector<Source>& sources) {
-    WriteConfig(Config(L"sources.txt"), EncodeSources(sources));
-}
-
 std::vector<fs::path> LoadIgnored() {
     std::ifstream stream(Config(L"excluded.txt"), std::ios::binary);
     std::vector<fs::path> result;
@@ -417,19 +413,59 @@ std::vector<fs::path> LoadIgnored() {
     return result;
 }
 
-void SaveIgnored(const std::vector<fs::path>& paths) {
-    std::string data;
-    for (const auto& path : paths) data += Utf8(path.native()) + '\n';
-    WriteConfig(Config(L"excluded.txt"), data);
-}
-
 fs::path LoadBackupFolder() {
     std::ifstream stream(Config(L"backup-folder.txt"), std::ios::binary);
     std::string data((std::istreambuf_iterator<char>(stream)), {});
     return Utf16(data);
 }
 
-void SaveBackupFolder(const fs::path& path) {
-    WriteConfig(Config(L"backup-folder.txt"), Utf8(path.native()));
+std::vector<fs::path> LoadBackupDestinations() {
+    std::ifstream input(Config(L"backup-destinations.txt"), std::ios::binary);
+    if (!input) {
+        auto previous = LoadBackupFolder();
+        return previous.empty() ? std::vector<fs::path>{} : std::vector<fs::path>{previous};
+    }
+    std::vector<fs::path> paths;
+    std::string line;
+    while (std::getline(input, line)) {
+        auto path = fs::path(Utf16(line));
+        if (IsAbsolutePath(path)) paths.push_back(std::move(path));
+    }
+    return paths;
+}
+
+void SaveBackupDestinations(const std::vector<fs::path>& paths) {
+    std::string data;
+    for (const auto& path : paths) data += Utf8(path.native()) + '\n';
+    WriteConfig(Config(L"backup-destinations.txt"), data);
+}
+
+bool LoadButtonTooltips() {
+    std::ifstream input(Config(L"button-tooltips.txt"), std::ios::binary);
+    return input.get() != '0';
+}
+
+void SaveButtonTooltips(bool enabled) {
+    WriteConfig(Config(L"button-tooltips.txt"), enabled ? "1" : "0");
+}
+
+std::optional<bool> LoadDarkMode() {
+    std::ifstream input(Config(L"dark-mode.txt"), std::ios::binary);
+    const auto state = input.get();
+    if (state == '0' || state == '1') return state == '1';
+    return std::nullopt;
+}
+
+void SaveDarkMode(bool enabled) {
+    WriteConfig(Config(L"dark-mode.txt"), enabled ? "1" : "0");
+}
+
+bool Load24HourTime() {
+    std::ifstream input(Config(L"24-hour-time.txt"), std::ios::binary);
+    return input.get() != '0';
+}
+
+void Save24HourTime(bool enabled) {
+    WriteConfig(Config(L"24-hour-time.txt"), enabled ? "1" : "0");
 }
 }

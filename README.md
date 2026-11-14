@@ -8,22 +8,22 @@ Download the installer ZIP from [GitHub Releases](https://github.com/jsmorley/Ra
 
 - **Scan** looks for the installed Rainmeter and running portable copies. **Scan folder** searches a folder you choose for portable installations. RainBackup remembers the sources and checkbox selections.
 - Expand the tree to individual files. **Add folder** and **Add file** can include anything you consider part of your setup, such as your plugin SDK. Select a source to use **Change path**, **Remove folder**, or **Remove file**. Uncheck individual items inside a source to exclude them from backups.
-- Enter a destination in **Backup destination**, or use **Browse**. **Back up now** confirms the selected item count and folder. RainBackup names the ZIP using the local date and time when the backup starts. Review scan notices before backing up. Selected OneDrive files may download on demand. If a selected file cannot be read, an existing ZIP stays intact.
+- Use **New** beside the backup name to save a name, destination, and optional schedule. Each named backup has its own sources and exclusions. Select one on the main window, use **Edit** to change its settings, and click **Back up now** to create a timestamped ZIP.
 
 ## Restore
 
-- **Open ZIP** opens a backup. Use the dropdown to switch between ZIPs in the same folder. Check individual items or click **Select all**.
-- **Delete backup** permanently deletes the selected ZIP after showing its full path and asking for confirmation. With no ZIP selected, it opens a file picker.
-- **Original location** uses the paths stored in the archive. **New location…** puts the selected files under one folder you choose. Review the resulting paths before restoring.
+- The Restore dropdown lists ZIPs for the selected named backup. **Open ZIP** can browse for other archives. Check individual items or click **Select all**.
+- **Delete ZIP** permanently deletes the selected ZIP after showing its full path and asking for confirmation. With no ZIP selected, it opens a file picker.
+- **Original location** uses the paths stored in the archive. **New location** puts the selected files under one folder you choose. Review the resulting paths before restoring.
 - Verify the preview. RainBackup requires an installed or detected portable Rainmeter. It closes running Rainmeter instances before writing and relaunches them afterward. A relocated restore updates the restored Rainmeter.ini when both settings and skins are mapped. New files inherit destination permissions, and replacement uses Windows’ access-control preservation. Restores apply file by file. A failure reports how many files were restored before it stopped.
 
 Interactive backups and restores show the current path and percent complete. **Cancel** discards an unfinished backup ZIP. During restore, files already written stay in place, and Rainmeter restarts if RainBackup closed it.
 
 ## Scheduling
 
-**Schedule** sets a daily or Monday backup, a local time, a destination, and how many managed copies to keep. Windows Task Scheduler runs it under the signed-in account. A missed backup runs when Windows and the account become available. Several missed intervals produce one current snapshot. The oldest managed ZIPs are removed after a successful backup. Other ZIPs are left alone. The schedule and latest result are stored in the RainBackup destination under Local AppData.
+Use **Edit** to choose manual only, daily, or Monday. Automatic backups keep a configurable number of copies per named backup and run under the signed-in account. RainBackup imports previous schedules as named backups.
 
-Open **Log…** on the main window for dated backup and restore results. **Empty log** clears the history after confirmation.
+Open **Log** on the main window for dated backup and restore results. **Empty log** clears the history after confirmation.
 
 ## Build
 

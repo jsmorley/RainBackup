@@ -4,6 +4,7 @@
 #include <filesystem>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <stop_token>
 #include <string>
 #include <vector>
@@ -64,9 +65,14 @@ std::unique_ptr<Tree> Build(std::vector<Source> sources, const Progress& progres
 std::string EncodeSources(const std::vector<Source>& sources);
 std::vector<Source> DecodeSources(std::string_view data);
 std::vector<Source> LoadSources();
-void SaveSources(const std::vector<Source>& sources);
 std::vector<fs::path> LoadIgnored();
-void SaveIgnored(const std::vector<fs::path>& paths);
 fs::path LoadBackupFolder();
-void SaveBackupFolder(const fs::path& path);
+std::vector<fs::path> LoadBackupDestinations();
+void SaveBackupDestinations(const std::vector<fs::path>& paths);
+bool LoadButtonTooltips();
+void SaveButtonTooltips(bool enabled);
+std::optional<bool> LoadDarkMode();
+void SaveDarkMode(bool enabled);
+bool Load24HourTime();
+void Save24HourTime(bool enabled);
 }

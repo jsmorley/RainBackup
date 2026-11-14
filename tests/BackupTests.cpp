@@ -131,6 +131,23 @@ int main() {
         Require(!fs::exists(first) && fs::exists(second) && fs::exists(third), "FIFO retention removed the wrong backups");
         Require(Read(managed / L"unrelated.zip") == "unrelated", "FIFO removed an unrelated file");
 
+        Schedule daily{managed, 1, false, L"18:00", NewScheduleId()};
+        Schedule weekly{managed, 1, true, L"18:00", NewScheduleId()};
+        const auto dailyFirst = SaveManagedBackup(*tree, daily);
+        const auto weeklyFirst = SaveManagedBackup(*tree, weekly);
+        Sleep(20);
+        const auto dailyNext = SaveManagedBackup(*tree, daily);
+        const auto named = SaveManagedBackup(*tree, daily, {}, false, L"Skins: daily");
+        Require(named.filename().wstring().starts_with(L"RainBackup-Skins- daily-") &&
+            IsProfileArchive(named, daily.id) && !IsProfileArchive(named, weekly.id),
+            "Named ZIP or profile association is incorrect");
+        Require(IsProfileArchive(dailyNext, daily.id) && !IsProfileArchive(dailyNext, weekly.id) &&
+            IsProfileArchive(second, {}), "Archive association did not match its backup");
+        Require(IsProfileArchive(L"RainBackup-2026-11-14_11-22-33-2.zip", L"00000000000000000000000000000001") &&
+            !IsProfileArchive(L"RainBackup-2026-11-14_11-22-33.zip", daily.id), "Legacy manual ZIP association is incorrect");
+        Require(!fs::exists(dailyFirst) && fs::exists(dailyNext) && fs::exists(weeklyFirst) &&
+            fs::exists(second) && fs::exists(third), "A schedule pruned another schedule's backups");
+
         fs::remove(skins / L"Clock" / L"Clock.ini");
         bool failed = false;
         auto oldZip = Read(archive);

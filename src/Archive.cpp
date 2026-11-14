@@ -326,7 +326,8 @@ void PreserveOwner(const fs::path& target, const fs::path& temporary) {
 }
 }
 
-void WriteZip(const Tree& tree, const fs::path& path, const Transfer& transfer, ZipDisposition disposition) {
+void WriteZip(const Tree& tree, const fs::path& path, const Transfer& transfer, ZipDisposition disposition,
+    std::string_view comment) {
     TransferProgress progress(transfer);
     progress.Begin(L"Measuring selected backup items…");
     CheckPath(path);
@@ -361,7 +362,7 @@ void WriteZip(const Tree& tree, const fs::path& path, const Transfer& transfer, 
         zipClose(zip, nullptr);
         throw;
     }
-    if (zipClose(zip, nullptr) != ZIP_OK) Fail(L"Could not finish writing the ZIP.");
+    if (zipClose(zip, std::string(comment).c_str()) != ZIP_OK) Fail(L"Could not finish writing the ZIP.");
     progress.Begin(L"Saving the finished ZIP…");
     CheckPath(path);
     progress.Check();
@@ -370,6 +371,17 @@ void WriteZip(const Tree& tree, const fs::path& path, const Transfer& transfer, 
     if (!MoveFileExW(temporary.path.c_str(), path.c_str(), flags)) {
         FileError(L"Could not save the ZIP.", path, GetLastError());
     }
+}
+
+std::string ReadZipComment(const fs::path& path) {
+    zlib_filefunc64_def io{};
+    fill_win32_filefunc64W(&io);
+    auto zip = unzOpen2_64(path.c_str(), &io);
+    if (!zip) return {};
+    char comment[80]{};
+    const int count = unzGetGlobalComment(zip, comment, sizeof(comment));
+    unzClose(zip);
+    return count > 0 ? std::string(comment, count) : std::string{};
 }
 
 OpenZip ReadZip(const fs::path& path) {
