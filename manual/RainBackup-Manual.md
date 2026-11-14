@@ -28,6 +28,8 @@ RainBackup imports existing schedules as separate backups with copies of the pre
 
 RainBackup remembers your sources and checkbox choices. Review **Scan issues…** if the scan reports unavailable paths or skipped links. Use **Scan** before a manual backup if you’ve added or removed files since the tree was loaded.
 
+Selection changes save automatically. Click **Save** beside **Clear selection** to save the current selection again and confirm it in the status line.
+
 ## Command line
 
 ```powershell

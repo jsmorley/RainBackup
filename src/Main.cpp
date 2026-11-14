@@ -31,7 +31,7 @@ enum Id {
     ScheduleFolder, Frequency, Time, Copies, SaveTask, RemoveTask, CloseDialog,
     BackupPath, CancelTransfer, DeleteBackup, ShowLog, EmptyLog, MoreMenu, Help, Releases, Support,
     ScheduleSavedFolders, ToggleTooltips, ToggleDarkMode, ProfileChoice, NewProfile, Time12Hour, Time24Hour,
-    OpenBackupDestination
+    OpenBackupDestination, SaveSelection
 };
 
 std::wstring DisplayTime(std::wstring_view time, bool use24Hour) {
@@ -94,6 +94,7 @@ const wchar_t* ButtonTip(int id, bool restore) {
     case MoreMenu: return L"Open Settings, Help, Releases, and Support.";
     case SelectAll: return L"Check all available folders and files.";
     case ClearAll: return L"Uncheck everything in the tree.";
+    case SaveSelection: return L"Save the current file and folder selection for this backup.";
     case Run: return restore ? L"Review the selected files and restore destinations." : L"Review and create a new backup ZIP.";
     case Open: return L"Browse for a backup ZIP, including in saved destinations.";
     case OpenBackupDestination: return L"Open the backup destination in Windows Explorer.";
@@ -518,7 +519,7 @@ struct App {
             {Open,L"Open ZIP"}, {Original,L"Original location"},
             {NewLocation,L"New location"}, {Details,L"Scan issues…"},
             {NewProfile,L"New"}, {ScheduleButton,L"Edit"}, {CancelTransfer,L"Cancel"}, {DeleteBackup,L"Delete ZIP"},
-            {OpenBackupDestination,DestinationArrow}
+            {OpenBackupDestination,DestinationArrow}, {SaveSelection,L"Save"}
         };
         showTooltips = LoadButtonTooltips();
         darkMode = LoadDarkMode();
@@ -566,9 +567,11 @@ struct App {
             }
         }
         y += 50;
-        place(summary, 30, y + 5, width - 350, 27);
-        button(SelectAll, width - 252, y, 95, 31);
-        button(ClearAll, width - 149, y, 119, 31);
+        const int saveWidth = restorePage ? 0 : 80;
+        place(summary, 30, y + 5, width - 350 - saveWidth, 27);
+        button(SelectAll, width - 252 - saveWidth, y, 95, 31);
+        button(ClearAll, width - 149 - saveWidth, y, 119, 31);
+        if (!restorePage) button(SaveSelection, width - 102, y, 72, 31);
         int lower = height - (restorePage ? 256 : 151);
         place(tree, 30, y + 42, width - 60, std::max(80, lower - y - 42));
         if (restorePage) {
@@ -612,7 +615,7 @@ struct App {
         if (!tree) return;
         const bool has = Active() && !Active()->root.children.empty();
         for (auto id : {ScanNow, ScanFolder, AddFolder, AddFile, Change, Remove, Details, NewProfile,
-            ScheduleButton, OpenBackupDestination}) {
+            ScheduleButton, OpenBackupDestination, SaveSelection}) {
             ShowWindow(buttons[id], restorePage ? SW_HIDE : SW_SHOW);
         }
         for (auto id : {Open, Original, NewLocation, DeleteBackup}) {
@@ -643,6 +646,7 @@ struct App {
             if (id == OpenBackupDestination) enabled &= hasProfile && !profiles.at(activeProfile).schedule.folder.empty();
             if (id == CancelTransfer) enabled = transferring && !stopTransfer.stop_requested();
             if (id == SelectAll || id == ClearAll) enabled &= has;
+            if (id == SaveSelection) enabled &= hasProfile && backup != nullptr;
             if (id == Run) enabled &= has && Active()->root.checked != 0;
             if (id == Details) enabled &= backup && !backup->warnings.empty();
             if (id == Change) enabled &= Selected() && !Selected()->path.empty();
@@ -1510,6 +1514,16 @@ void App::Command(int id, int notification) {
     }
     case SelectAll: if (Active()) Toggle(&Active()->root, true); break;
     case ClearAll: if (Active()) Toggle(&Active()->root, false); break;
+    case SaveSelection:
+        if (restorePage || !backup || profiles.empty()) break;
+        try {
+            RecordSelection();
+            notice = L"Saved current selection";
+        } catch (const std::exception&) {
+            notice = L"Could not save the selection for " + profiles.at(activeProfile).name + L".";
+        }
+        Refresh();
+        break;
     case Run: restorePage ? RunRestore() : RunBackup(); break;
     case ProfileChoice:
         if (notification == CBN_SELCHANGE) {

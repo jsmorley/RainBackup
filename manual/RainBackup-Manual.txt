@@ -28,6 +28,8 @@ CHOOSE WHAT TO BACK UP
 
 RainBackup remembers your sources and checkbox choices. Review Scan issues... if the scan reports unavailable paths or skipped links. Use Scan before a manual backup if you've added or removed files since the tree was loaded.
 
+Selection changes save automatically. Click Save beside Clear selection to save the current selection again and confirm it in the status line.
+
 COMMAND LINE
 
 Use RainBackup.exe "My scheme" Backup or RainBackup.exe "My scheme" Restore. Quote names with spaces. Both commands run without a window, prompts, or console output. The exit code is 0 for success, 1 for an operation failure, or 2 for invalid arguments. Operation details appear in Log.
