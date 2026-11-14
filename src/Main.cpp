@@ -98,31 +98,31 @@ std::wstring ScheduleTime(std::wstring input, bool use24Hour) {
 const wchar_t* ButtonTip(int id, bool restore) {
     switch (id) {
     case BackupPage: return L"Choose the files and folders to back up.";
-    case RestorePage: return L"Choose an archive for this backup or open another ZIP.";
+    case RestorePage: return L"Choose an archive for this scheme or open another ZIP.";
     case ScanNow: return L"Detect Rainmeter setups and refresh the source tree.";
     case ScanFolder: return L"Look for portable Rainmeter installations in a folder.";
     case AddFolder: return L"Add another folder to the backup sources.";
     case AddFile: return L"Add another file to the backup sources.";
     case Change: return L"Set a new path for this backup source.";
     case Remove: return L"Remove this source from future backups.";
-    case ScheduleButton: return L"Edit this backup's name, destination, and schedule.";
-    case NewProfile: return L"Create a named backup with its own sources.";
+    case ScheduleButton: return L"Edit this scheme's name, destination, and schedule.";
+    case NewProfile: return L"Create a backup scheme with its own sources.";
     case ShowLog: return L"View backup and restore results.";
     case MoreMenu: return L"Open Settings, Help, Releases, and Support.";
     case SelectAll: return L"Check all available folders and files.";
     case ClearAll: return L"Uncheck everything in the tree.";
-    case SaveSelection: return L"Save the current file and folder selection for this backup.";
+    case SaveSelection: return L"Save the current file and folder selection for this scheme.";
     case Run: return restore ? L"Review the selected files and restore destinations." : L"Review and create a new backup ZIP.";
     case Open: return L"Browse for a backup ZIP, including in saved destinations.";
     case Original: return L"Restore to the paths recorded in the ZIP.";
     case NewLocation: return L"Choose one folder for the restored files.";
     case Details: return L"Show unreadable paths and skipped links from the scan.";
-    case ScheduleFolder: return L"Browse for the folder this backup will use.";
+    case ScheduleFolder: return L"Browse for the folder this scheme will use.";
     case ScheduleSavedFolders: return L"Choose a saved backup destination.";
     case CancelTransfer: return L"Request cancellation of the current operation.";
     case DeleteBackup: return L"Permanently delete a backup ZIP after confirmation.";
-    case SaveTask: return L"Save this named backup.";
-    case RemoveTask: return L"Remove this named backup and optionally delete its ZIP files.";
+    case SaveTask: return L"Save this backup scheme.";
+    case RemoveTask: return L"Remove this scheme and optionally delete its ZIP files.";
     case EmptyLog: return L"Clear the backup and restore history after confirmation.";
     case CloseDialog: return L"Close this dialog.";
     default: return nullptr;
@@ -384,6 +384,7 @@ struct App {
     std::map<Node*, HTREEITEM> items;
     std::thread worker;
     std::wstring notice;
+    std::optional<POINT> normalWindowPosition;
 
     ~App() {
         if (worker.joinable()) worker.join();
@@ -677,7 +678,7 @@ struct App {
             if (label.empty() && has) label = std::to_wstring(Active()->root.checked) + L" of " +
                 std::to_wstring(Active()->root.total) + L" items selected";
             if (label.empty()) label = restorePage ? L"Choose a backup ZIP to see what it contains." :
-                hasProfile ? L"Scan or add a source to start." : L"Click New beside the backup name to get started.";
+                hasProfile ? L"Scan or add a source to start." : L"Click New beside the scheme name to get started.";
             if (!use24Hour && label.starts_with(L"Last scheduled backup ") && label.size() >= 8 &&
                 label[label.size() - 6] == L':' && label[label.size() - 3] == L':') {
                 label.replace(label.size() - 8, 8, DisplayTime(std::wstring_view(label).substr(label.size() - 8), false));
@@ -930,7 +931,7 @@ struct App {
     void RefreshProfiles() {
         SendMessageW(profileChoice, CB_RESETCONTENT, 0, 0);
         if (profiles.empty()) {
-            SendMessageW(profileChoice, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"No named backups"));
+            SendMessageW(profileChoice, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"No backup schemes"));
         }
         for (const auto& profile : profiles) {
             SendMessageW(profileChoice, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(profile.name.c_str()));
@@ -1061,14 +1062,14 @@ struct App {
     void RunBackup() {
         const auto profile = profiles.at(activeProfile);
         auto folder = profile.schedule.folder;
-        if (folder.empty()) Fail(L"Click Edit beside the backup name to choose a destination.");
+        if (folder.empty()) Fail(L"Click Edit beside the scheme name to choose a destination.");
         folder.make_preferred();
         if (folder != folder.root_path() && folder.filename().empty()) folder = folder.parent_path();
         CheckPath(folder);
         if (!fs::is_directory(folder)) Fail(L"Choose an existing backup folder.");
         if (!Confirm(window, L"Back up " + std::to_wstring(backup->root.checked) + L" selected items?",
             profile.name + L"\n" + folder.wstring() +
-            (profile.automatic ? L"\n\nThis backup keeps " + std::to_wstring(profile.schedule.copies) +
+            (profile.automatic ? L"\n\nThis scheme keeps " + std::to_wstring(profile.schedule.copies) +
                 L" copies. Older excess copies will be deleted after the ZIP is saved." : L"") +
             (!backup->warnings.empty() ? L"\n\nSome source items were unavailable. See Scan issues for paths." : L"") +
             L"\n\nSelected online-only files may download from OneDrive.", profile.automatic)) return;
@@ -1189,7 +1190,7 @@ struct ScheduleDialog {
             return;
         }
         const auto& schedule = profile.schedule;
-        Add(L"STATIC", L"Backup name", 0, 0, Padding, 18, 360, 20);
+        Add(L"STATIC", L"Scheme name", 0, 0, Padding, 18, 360, 20);
         name = Add(L"EDIT", profile.name.c_str(), WS_BORDER | ES_AUTOHSCROLL | WS_TABSTOP, 0,
             Padding, 42, Width - 2 * Padding, 27);
         SendMessageW(name, EM_SETLIMITTEXT, 100, 0);
@@ -1213,10 +1214,10 @@ struct ScheduleDialog {
         Add(L"STATIC", L"Choose sources and exclusions in Rainmeter setups on the Backup screen.",
             0, 0, Padding, 218, Width - 2 * Padding, 32);
         if (!creating) {
-            Add(L"BUTTON", L"Remove backup…", WS_TABSTOP, RemoveTask, Padding, Footer, 140, 32);
+            Add(L"BUTTON", L"Remove scheme…", WS_TABSTOP, RemoveTask, Padding, Footer, 140, 32);
         }
         Add(L"BUTTON", L"Close", WS_TABSTOP, CloseDialog, SaveLeft - 96, Footer, 84, 32);
-        Add(L"BUTTON", L"Save backup", BS_DEFPUSHBUTTON | WS_TABSTOP, SaveTask, SaveLeft, Footer, SaveWidth, 32);
+        Add(L"BUTTON", L"Save scheme", BS_DEFPUSHBUTTON | WS_TABSTOP, SaveTask, SaveLeft, Footer, SaveWidth, 32);
     }
 
     void SetScheduleControls() const {
@@ -1237,12 +1238,12 @@ struct ScheduleDialog {
         auto value = profile;
         value.name = Text(name);
         const auto first = value.name.find_first_not_of(L" \t");
-        if (first == value.name.npos) Fail(L"Enter a name for this backup.");
+        if (first == value.name.npos) Fail(L"Enter a name for this scheme.");
         value.name = value.name.substr(first, value.name.find_last_not_of(L" \t") - first + 1);
         for (const auto& other : app.profiles) {
             if (other.schedule.id != profile.schedule.id &&
                 CompareStringOrdinal(other.name.c_str(), -1, value.name.c_str(), -1, TRUE) == CSTR_EQUAL) {
-                Fail(L"Choose a name that is different from the other backups.");
+                Fail(L"Choose a name that is different from the other schemes.");
             }
         }
         auto& schedule = value.schedule;
@@ -1332,7 +1333,7 @@ struct ScheduleDialog {
                 details += L"\n\nThe destination could not be inspected. Its ZIP files will be kept.";
             }
             BOOL deleteArchives = FALSE;
-            if (!Confirm(dialog, L"Remove this named backup?", details, true,
+            if (!Confirm(dialog, L"Remove this scheme?", details, true,
                 canDelete ? L"Remove all .zip files as well" : nullptr, &deleteArchives)) break;
             if (deleteArchives) CheckPath(destination);
             if (profile.automatic) DeleteSchedule(profile.schedule.id);
@@ -1345,7 +1346,7 @@ struct ScheduleDialog {
             for (const auto& path : archives) {
                 if (IsReparse(path) || (!DeleteFileW(path.c_str()) && GetLastError() != ERROR_FILE_NOT_FOUND)) ++failed;
             }
-            if (failed) Message(dialog, L"The backup was removed, but " + std::to_wstring(failed) +
+            if (failed) Message(dialog, L"The scheme was removed, but " + std::to_wstring(failed) +
                 L" ZIP file(s) could not be deleted.\n\n" + destination.wstring(), MB_ICONWARNING);
             break;
         }
@@ -1404,10 +1405,10 @@ struct ScheduleDialog {
         AdjustWindowRectExForDpi(&r, style, FALSE, WS_EX_DLGMODALFRAME, app.dpi);
         int w = r.right - r.left, h = r.bottom - r.top;
         dialog = CreateWindowExW(WS_EX_DLGMODALFRAME | WS_EX_CONTROLPARENT, windowClass,
-            showLog ? L"Backup and restore log" : creating ? L"New backup" : L"Edit backup", style,
+            showLog ? L"Backup and restore log" : creating ? L"New scheme" : L"Edit scheme", style,
             (owner.left + owner.right - w) / 2, (owner.top + owner.bottom - h) / 2,
             w, h, app.window, nullptr, app.instance, this);
-        if (!dialog) Fail(showLog ? L"Could not open the operation log." : L"Could not open the backup editor.");
+        if (!dialog) Fail(showLog ? L"Could not open the operation log." : L"Could not open the scheme editor.");
         BOOL dark = app.palette.dark;
         DwmSetWindowAttribute(dialog, 20, &dark, sizeof(dark));
         EnableWindow(app.window, FALSE);
@@ -1664,6 +1665,29 @@ void App::Command(int id, int notification) {
     }
 }
 
+void PositionMainWindow(HWND window) {
+    const auto saved = LoadMainWindowPosition();
+    const auto savedMonitor = saved ? MonitorFromPoint(*saved, MONITOR_DEFAULTTONULL) : nullptr;
+    MONITORINFO monitor{};
+    monitor.cbSize = sizeof(monitor);
+    if (!GetMonitorInfoW(savedMonitor ? savedMonitor : MonitorFromWindow(window, MONITOR_DEFAULTTOPRIMARY),
+        &monitor)) return;
+
+    const auto& work = monitor.rcWork;
+    auto move = [&] {
+        RECT bounds{};
+        if (!GetWindowRect(window, &bounds)) return;
+        const LONG lastX = std::max(work.left, work.right - (bounds.right - bounds.left));
+        const LONG lastY = std::max(work.top, work.bottom - (bounds.bottom - bounds.top));
+        const LONG x = savedMonitor ? std::clamp(saved->x, work.left, lastX) : work.left + (lastX - work.left) / 2;
+        const LONG y = savedMonitor ? std::clamp(saved->y, work.top, lastY) : work.top + (lastY - work.top) / 2;
+        SetWindowPos(window, nullptr, x, y, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+    };
+    const auto dpi = GetDpiForWindow(window);
+    move();
+    if (GetDpiForWindow(window) != dpi) move();
+}
+
 LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
     auto app = reinterpret_cast<App*>(GetWindowLongPtrW(window, GWLP_USERDATA));
     if (message == WM_NCCREATE) {
@@ -1676,6 +1700,13 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
         switch (message) {
         case WM_CREATE: app->Init(); return 0;
         case WM_SIZE: if (app->tree) app->Layout(); return 0;
+        case WM_MOVE: {
+            RECT bounds{};
+            if (!IsIconic(window) && !IsZoomed(window) && GetWindowRect(window, &bounds)) {
+                app->normalWindowPosition = POINT{bounds.left, bounds.top};
+            }
+            break;
+        }
         case WM_GETMINMAXINFO: {
             auto info = reinterpret_cast<MINMAXINFO*>(lp);
             info->ptMinTrackSize = {app->Px(775), app->Px(680)};
@@ -1731,7 +1762,7 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
                 FillRect(row->hDC, &row->rcItem, fill);
                 DeleteObject(fill);
                 if (row->itemID < app->profiles.size() || app->profiles.empty()) {
-                    const auto* name = app->profiles.empty() ? L"No named backups" : app->profiles[row->itemID].name.c_str();
+                    const auto* name = app->profiles.empty() ? L"No backup schemes" : app->profiles[row->itemID].name.c_str();
                     auto bounds = row->rcItem;
                     bounds.left += app->Px(5);
                     bounds.right -= app->Px(3);
@@ -1888,7 +1919,13 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
             return SetupCloseAccepted;
         case WM_CLOSE:
             if (app->busy) Message(window, L"Wait for the current operation to finish.");
-            else DestroyWindow(window);
+            else {
+                if (app->normalWindowPosition) {
+                    try { SaveMainWindowPosition(*app->normalWindowPosition); }
+                    catch (const std::exception&) { /* Close even if settings cannot be written. */ }
+                }
+                DestroyWindow(window);
+            }
             return 0;
         case WM_DESTROY: PostQuitMessage(0); return 0;
         }
@@ -1940,6 +1977,9 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR arguments, int show) {
         WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN, CW_USEDEFAULT, CW_USEDEFAULT,
         MulDiv(965, dpi, 96), MulDiv(700, dpi, 96), nullptr, nullptr, instance, &app);
     if (!window) { CoUninitialize(); return 1; }
+    PositionMainWindow(window);
+    RECT bounds{};
+    if (GetWindowRect(window, &bounds)) app.normalWindowPosition = POINT{bounds.left, bounds.top};
     ShowWindow(window, show);
     UpdateWindow(window);
     MSG message{};

@@ -12,9 +12,9 @@ The plain-text manual is installed as **RainBackup-Manual.txt** in the same fold
 
 Setup closes idle RainBackup windows before replacing the program files. If a backup or restore is running, wait for it to finish, then click **Retry**.
 
-## Create or edit a named backup
+## Create or edit a backup scheme
 
-Click **New** beside the backup name to enter a name, choose a destination, and set an optional schedule. Each backup has its own sources and checkboxes. Use the name picker to switch backups and **Edit** to change the selected backup’s settings.
+Click **New** beside the scheme name to enter a name, choose a destination, and set an optional schedule. Each scheme has its own sources and checkboxes. Use the name picker to switch schemes and **Edit** to change the selected scheme’s settings.
 
 RainBackup imports existing schedules as separate backups with copies of the previous source selection. Existing ZIPs stay in place.
 
@@ -45,8 +45,8 @@ Use `Backup` or `Restore` after the name of a saved scheme. Quote names with spa
 
 ## Create a backup ZIP
 
-1. Select a named backup. Use **Edit** to view or change its destination.
-2. Click **Back up now…** and review the confirmation. RainBackup names the ZIP using the backup name and local time, for example **RainBackup-Skins-2026-11-14-18-00-00.zip**, and shows the full path when it finishes.
+1. Select a backup scheme. Use **Edit** to view or change its destination.
+2. Click **Back up now…** and review the confirmation. RainBackup names the ZIP using the scheme name and local time, for example **RainBackup-Skins-2026-11-14-18-00-00.zip**, and shows the full path when it finishes.
 3. Watch the progress bar and current path. Click **Cancel** to discard the unfinished ZIP. If the operation is canceled or fails before the new archive is saved, any existing ZIP at that path stays in place.
 
 If the skins are in OneDrive, Windows may download selected online-only files as RainBackup reads them. If a file can’t be read, check OneDrive’s connection or use **Always keep on this device** in File Explorer, then try again.
@@ -54,7 +54,7 @@ If the skins are in OneDrive, Windows may download selected online-only files as
 ## Restore a backup
 
 1. Install Rainmeter on the destination PC before restoring. For a portable copy that RainBackup hasn’t detected, use **Backup** → **Scan folder…** to register it.
-2. Select a named backup and open **Restore**. Choose one of its ZIPs from the dropdown. **Open ZIP** starts in the folder of the last ZIP you chose through that button. If that folder is unavailable or you haven't chosen a ZIP yet, the dialog opens at the **RainBackup** group of saved destinations when the group is available.
+2. Select a backup scheme and open **Restore**. Choose one of its ZIPs from the dropdown. **Open ZIP** starts in the folder of the last ZIP you chose through that button. If that folder is unavailable or you haven't chosen a ZIP yet, the dialog opens at the **RainBackup** group of saved destinations when the group is available.
 3. Expand the archive tree and check the items to restore. Click **Select all** to restore the entire backup.
 4. Choose a destination. The list shows the backup type, original location, and restore destination for each source.
 5. Click **Restore selected…**. Review the destinations and the number of existing files that will be overwritten, then click **Yes**. RainBackup closes running Rainmeter instances before writing and reopens those instances afterward.
@@ -70,13 +70,13 @@ When a relocated restore includes **Rainmeter.ini** and a skins destination is m
 
 ## Schedule backups and keep a set number of copies
 
-1. Select a named backup and click **Edit**.
+1. Select a backup scheme and click **Edit**.
 2. Set **Schedule** to **Manual only**, **Daily**, or **Weekly on Monday**. For automatic backups, enter a local time such as **18:00** and set **Copies to keep** to a number from 1 to 999.
-3. Click **Save backup** and confirm.
+3. Click **Save scheme** and confirm.
 
-Windows Task Scheduler runs automatic backups under your signed-in account and catches up with one current backup after missed runs. Retention applies to both automatic and on-demand runs of that named backup. Manual-only backups keep all copies.
+Windows Task Scheduler runs automatic backups under your signed-in account and catches up with one current backup after missed runs. Retention applies to both automatic and on-demand runs of that scheme. Manual-only schemes keep all copies.
 
-Switch to **Manual only** to stop automatic runs. In **Edit**, choose **Remove backup…** to remove the definition and its schedule. If matching ZIPs are found in its current destination, check **Remove all .zip files as well** to delete them permanently. The box starts unchecked. You can open any ZIPs you keep with **Open ZIP**.
+Switch to **Manual only** to stop automatic runs. In **Edit**, choose **Remove scheme…** to remove the scheme and its schedule. If matching ZIPs are found in its current destination, check **Remove all .zip files as well** to delete them permanently. The box starts unchecked. You can open any ZIPs you keep with **Open ZIP**.
 
 ## View or empty the operation log
 
@@ -90,7 +90,7 @@ To turn button tooltips on or off, open **More options → Settings → Show but
 
 Use **More options → Settings → Dark Mode** to switch between light and dark. RainBackup follows the Windows app theme until you choose a mode.
 
-Choose **12-hour time** or **24-hour time** under **More options → Settings**. This applies to the schedule editor, the Restore dropdown for a named backup, and the log view. ZIP filenames use 24-hour time.
+Choose **12-hour time** or **24-hour time** under **More options → Settings**. This applies to the schedule editor, the Restore dropdown for a backup scheme, and the log view. ZIP filenames use 24-hour time.
 
 ## Delete an old backup
 

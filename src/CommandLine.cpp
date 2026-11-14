@@ -49,7 +49,7 @@ int RunNamedCommand() {
             if (profile) Fail(L"More than one backup matches this name.");
             profile = &candidate;
         }
-        if (!profile) Fail(L"No named backup matches this name.");
+        if (!profile) Fail(L"No backup scheme matches this name.");
 
         if (backup) {
             auto tree = Build(profile->sources);

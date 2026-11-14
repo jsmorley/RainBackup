@@ -479,4 +479,16 @@ bool Load24HourTime() {
 void Save24HourTime(bool enabled) {
     WriteConfig(Config(L"24-hour-time.txt"), enabled ? "1" : "0");
 }
+
+std::optional<POINT> LoadMainWindowPosition() {
+    std::ifstream input(Config(L"main-window-position.txt"));
+    POINT position{};
+    if (input >> position.x >> position.y && (input >> std::ws).eof()) return position;
+    return std::nullopt;
+}
+
+void SaveMainWindowPosition(POINT position) {
+    WriteConfig(Config(L"main-window-position.txt"),
+        std::to_string(position.x) + " " + std::to_string(position.y) + "\n");
+}
 }

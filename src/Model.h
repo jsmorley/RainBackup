@@ -77,4 +77,6 @@ std::optional<bool> LoadDarkMode();
 void SaveDarkMode(bool enabled);
 bool Load24HourTime();
 void Save24HourTime(bool enabled);
+std::optional<POINT> LoadMainWindowPosition();
+void SaveMainWindowPosition(POINT position);
 }
