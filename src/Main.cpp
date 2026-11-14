@@ -507,7 +507,7 @@ struct App {
         LoadHeaderIcon();
         Fonts();
         title = Control(L"STATIC", L"RainBackup", SS_NOPREFIX);
-        sub = Control(L"STATIC", L"Backup and restore your Rainmeter setups", SS_NOPREFIX);
+        sub = Control(L"STATIC", L"Backup and restore your Rainmeter folders and files", SS_NOPREFIX);
         summary = Control(L"STATIC", L"", SS_NOPREFIX);
         detail = Control(L"STATIC", L"", SS_PATHELLIPSIS | SS_NOPREFIX);
         status = Control(L"STATIC", L"", SS_PATHELLIPSIS | SS_NOPREFIX);
@@ -668,7 +668,7 @@ struct App {
         EnableWindow(zipList, !busy && !loadingZip && !zips.empty());
         SetWindowTextW(buttons[Run], restorePage ? L"Restore selected…" : L"Back up now…");
         SetButtonTip(tooltips, window, buttons[Run], ButtonTip(Run, restorePage), true);
-        SetWindowTextW(summary, restorePage ? L"Archive contents" : L"Rainmeter setups");
+        SetWindowTextW(summary, restorePage ? L"Archive contents" : L"Rainmeter folders and files");
         const std::wstring restoreMode = !opened.tree ? L"" :
             original ? L"Restore to original locations" :
             restoreFolder.empty() ? L"Choose a restore folder." : L"Restore under " + restoreFolder.wstring();
@@ -1211,7 +1211,7 @@ struct ScheduleDialog {
         copies = Add(L"EDIT", std::to_wstring(schedule.copies).c_str(), WS_BORDER | ES_NUMBER | WS_TABSTOP,
             Copies, 417, 172, 100, 27);
         SetScheduleControls();
-        Add(L"STATIC", L"Choose sources and exclusions in Rainmeter setups on the Backup screen.",
+        Add(L"STATIC", L"Choose sources and exclusions under Rainmeter folders and files on the Backup screen.",
             0, 0, Padding, 218, Width - 2 * Padding, 32);
         if (!creating) {
             Add(L"BUTTON", L"Remove scheme…", WS_TABSTOP, RemoveTask, Padding, Footer, 140, 32);
