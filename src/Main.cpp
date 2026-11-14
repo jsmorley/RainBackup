@@ -6,10 +6,13 @@
 #include <commctrl.h>
 #include <chrono>
 #include <windowsx.h>
+#include <d2d1.h>
+#include <dwrite.h>
 #include <dwmapi.h>
 #include <shlobj.h>
 #include <shellapi.h>
 #include <uxtheme.h>
+#include <wrl/client.h>
 #include <algorithm>
 #include <map>
 #include <thread>
@@ -19,6 +22,7 @@ namespace {
 constexpr UINT Finished = WM_APP + 1, ProgressUpdate = WM_APP + 2;
 constexpr int RainBackupIcon = 101;
 constexpr int HeaderLogoSize = 64;
+constexpr wchar_t DestinationArrow[] = L"⬆️";
 enum Id {
     BackupPage = 100, RestorePage, ScanNow, ScanFolder, AddFolder, AddFile, Change, Remove, ScheduleButton,
     SelectAll, ClearAll, Run, Open, Original, NewLocation, Details, ZipList, TreeId, Destinations,
@@ -453,7 +457,7 @@ struct App {
             {Open,L"Open ZIP"}, {Original,L"Original location"},
             {NewLocation,L"New location"}, {Details,L"Scan issues…"},
             {NewProfile,L"New"}, {ScheduleButton,L"Edit"}, {CancelTransfer,L"Cancel"}, {DeleteBackup,L"Delete ZIP"},
-            {OpenBackupDestination,L"↑"}
+            {OpenBackupDestination,DestinationArrow}
         };
         showTooltips = LoadButtonTooltips();
         darkMode = LoadDarkMode();
@@ -1598,6 +1602,64 @@ void App::Command(int id, int notification) {
     }
 }
 
+void DrawDestinationArrow(const DRAWITEMSTRUCT& item, const App& app) {
+    using Microsoft::WRL::ComPtr;
+
+    const RECT& bounds = item.rcItem;
+    const auto& palette = app.palette;
+    const bool disabled = item.itemState & ODS_DISABLED;
+    const COLORREF ink = disabled ? palette.quiet : palette.text;
+    auto color = [](COLORREF value) {
+        return D2D1::ColorF(GetRValue(value) / 255.0f, GetGValue(value) / 255.0f, GetBValue(value) / 255.0f);
+    };
+    auto drawEmoji = [&] {
+        ComPtr<ID2D1Factory> graphics;
+        ComPtr<IDWriteFactory> fonts;
+        ComPtr<IDWriteTextFormat> format;
+        ComPtr<ID2D1DCRenderTarget> target;
+        ComPtr<ID2D1SolidColorBrush> brush;
+        const auto properties = D2D1::RenderTargetProperties(D2D1_RENDER_TARGET_TYPE_DEFAULT,
+            D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_IGNORE), 96.0f, 96.0f);
+        if (FAILED(D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, graphics.GetAddressOf())) ||
+            FAILED(DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory),
+                reinterpret_cast<IUnknown**>(fonts.GetAddressOf()))) ||
+            FAILED(fonts->CreateTextFormat(L"Segoe UI Emoji", nullptr, DWRITE_FONT_WEIGHT_NORMAL,
+                DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, static_cast<float>(app.Px(18)),
+                L"en-US", format.GetAddressOf())) ||
+            FAILED(graphics->CreateDCRenderTarget(&properties, target.GetAddressOf())) ||
+            FAILED(target->BindDC(item.hDC, &bounds)) ||
+            FAILED(target->CreateSolidColorBrush(color(ink), brush.GetAddressOf()))) return false;
+
+        format->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
+        format->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+        target->BeginDraw();
+        target->Clear(color(palette.bg));
+        target->DrawText(DestinationArrow, static_cast<UINT32>(std::size(DestinationArrow) - 1),
+            format.Get(), D2D1::RectF(0, 0, static_cast<float>(bounds.right - bounds.left),
+                static_cast<float>(bounds.bottom - bounds.top)), brush.Get(),
+            disabled ? D2D1_DRAW_TEXT_OPTIONS_NONE : D2D1_DRAW_TEXT_OPTIONS_ENABLE_COLOR_FONT);
+        return SUCCEEDED(target->EndDraw());
+    };
+
+    if (!drawEmoji()) {
+        FillRect(item.hDC, &bounds, palette.background);
+        SetBkMode(item.hDC, TRANSPARENT);
+        SetTextColor(item.hDC, ink);
+        const auto previous = SelectObject(item.hDC, app.regular);
+        RECT textBounds = bounds;
+        DrawTextW(item.hDC, DestinationArrow, -1, &textBounds, DT_SINGLELINE | DT_CENTER | DT_VCENTER);
+        SelectObject(item.hDC, previous);
+    }
+    if (!disabled && (item.itemState & ODS_SELECTED ||
+        (item.itemState & ODS_FOCUS && !(item.itemState & ODS_NOFOCUSRECT)))) {
+        RECT underline{bounds.left + app.Px(6), bounds.bottom - app.Px(3),
+            bounds.right - app.Px(6), bounds.bottom - app.Px(2)};
+        auto brush = CreateSolidBrush(palette.accent);
+        FillRect(item.hDC, &underline, brush);
+        DeleteObject(brush);
+    }
+}
+
 LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
     auto app = reinterpret_cast<App*>(GetWindowLongPtrW(window, GWLP_USERDATA));
     if (message == WM_NCCREATE) {
@@ -1678,6 +1740,10 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
             auto row = reinterpret_cast<DRAWITEMSTRUCT*>(lp);
             if (row->CtlType != ODT_BUTTON) break;
             auto id = row->CtlID;
+            if (id == OpenBackupDestination) {
+                DrawDestinationArrow(*row, *app);
+                return TRUE;
+            }
             auto r = row->rcItem;
             auto& p = app->palette;
             bool disabled = row->itemState & ODS_DISABLED;
