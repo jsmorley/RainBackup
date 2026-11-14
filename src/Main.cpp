@@ -13,6 +13,7 @@
 #include <shellapi.h>
 #include <uxtheme.h>
 #include <wrl/client.h>
+#include <wrl/implements.h>
 #include <algorithm>
 #include <map>
 #include <thread>
@@ -166,8 +167,61 @@ void Message(HWND window, const std::wstring& message, UINT icon = MB_ICONINFORM
 }
 
 enum class Picker { Folder, Open };
+
+void CALLBACK OpenBackupPlaces(HWND dialog, UINT, UINT_PTR timer, DWORD) {
+    KillTimer(dialog, timer);
+    HWND tree = nullptr;
+    EnumChildWindows(dialog, [](HWND control, LPARAM context) -> BOOL {
+        wchar_t name[32]{};
+        GetClassNameW(control, name, static_cast<int>(std::size(name)));
+        if (wcscmp(name, WC_TREEVIEWW) != 0 || GetDlgCtrlID(control) != 100) return TRUE;
+        *reinterpret_cast<HWND*>(context) = control;
+        return FALSE;
+    }, reinterpret_cast<LPARAM>(&tree));
+    if (!tree) return;
+
+    // The common dialog creates this group from AddPlace entries when it opens.
+    for (auto item = TreeView_GetChild(tree, TreeView_GetRoot(tree)); item;
+        item = TreeView_GetNextSibling(tree, item)) {
+        wchar_t name[32]{};
+        TVITEMW info{};
+        info.mask = TVIF_TEXT | TVIF_CHILDREN;
+        info.hItem = item;
+        info.pszText = name;
+        info.cchTextMax = static_cast<int>(std::size(name));
+        if (TreeView_GetItem(tree, &info) && info.cChildren && wcscmp(name, L"RainBackup") == 0) {
+            TreeView_SelectItem(tree, item);
+            break;
+        }
+    }
+}
+
+class BackupPlacesEvents final : public Microsoft::WRL::RuntimeClass<
+    Microsoft::WRL::RuntimeClassFlags<Microsoft::WRL::ClassicCom>, IFileDialogEvents> {
+public:
+    HRESULT STDMETHODCALLTYPE OnFolderChange(IFileDialog* dialog) override {
+        if (!pending) return S_OK;
+        Microsoft::WRL::ComPtr<IOleWindow> window;
+        HWND handle = nullptr;
+        if (SUCCEEDED(dialog->QueryInterface(IID_PPV_ARGS(window.GetAddressOf()))) &&
+            SUCCEEDED(window->GetWindow(&handle)) && handle) {
+            pending = false;
+            SetTimer(handle, reinterpret_cast<UINT_PTR>(this), USER_TIMER_MINIMUM, OpenBackupPlaces);
+        }
+        return S_OK;
+    }
+    HRESULT STDMETHODCALLTYPE OnFileOk(IFileDialog*) override { return S_OK; }
+    HRESULT STDMETHODCALLTYPE OnFolderChanging(IFileDialog*, IShellItem*) override { return S_OK; }
+    HRESULT STDMETHODCALLTYPE OnSelectionChange(IFileDialog*) override { return S_OK; }
+    HRESULT STDMETHODCALLTYPE OnShareViolation(IFileDialog*, IShellItem*, FDE_SHAREVIOLATION_RESPONSE*) override { return S_OK; }
+    HRESULT STDMETHODCALLTYPE OnTypeChange(IFileDialog*) override { return S_OK; }
+    HRESULT STDMETHODCALLTYPE OnOverwrite(IFileDialog*, IShellItem*, FDE_OVERWRITE_RESPONSE*) override { return S_OK; }
+private:
+    bool pending = true;
+};
+
 fs::path Browse(HWND owner, Picker type, const fs::path& initial = {}, bool zipOnly = false,
-    const std::vector<fs::path>& places = {}) {
+    const std::vector<fs::path>& places = {}, bool openBackupZip = false) {
     IFileDialog* dialog = nullptr;
     HRESULT result = CoCreateInstance(CLSID_FileOpenDialog,
         nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&dialog));
@@ -191,14 +245,20 @@ fs::path Browse(HWND owner, Picker type, const fs::path& initial = {}, bool zipO
         }
     }
 
+    bool startedInFolder = false;
     if (!initial.empty()) {
         IShellItem* item = nullptr;
         if (SUCCEEDED(SHCreateItemFromParsingName(initial.c_str(), nullptr, IID_PPV_ARGS(&item)))) {
-            dialog->SetFolder(item);
+            startedInFolder = SUCCEEDED(dialog->SetFolder(item));
             item->Release();
         }
     }
+    DWORD cookie = 0;
+    const auto events = openBackupZip && !startedInFolder && !places.empty()
+        ? Microsoft::WRL::Make<BackupPlacesEvents>() : Microsoft::WRL::ComPtr<BackupPlacesEvents>{};
+    const bool advised = events && SUCCEEDED(dialog->Advise(events.Get(), &cookie));
     result = dialog->Show(owner);
+    if (advised) dialog->Unadvise(cookie);
     if (result == HRESULT_FROM_WIN32(ERROR_CANCELLED)) return {};
     if (FAILED(result)) Fail(L"The Windows file picker failed.");
     IShellItem* item = nullptr;
@@ -1471,8 +1531,14 @@ void App::Command(int id, int notification) {
         break;
     case NewProfile: EditProfile(true); break;
     case Open: {
-        auto path = Browse(window, Picker::Open, lastFolder, true, BackupPlaces());
-        if (!path.empty()) LoadZip(path, true);
+        auto folder = LoadOpenZipFolder();
+        std::error_code error;
+        if (!fs::is_directory(folder, error)) folder.clear();
+        auto path = Browse(window, Picker::Open, folder, true, BackupPlaces(), true);
+        if (!path.empty()) {
+            SaveOpenZipFolder(path.parent_path());
+            LoadZip(path, true);
+        }
         break;
     }
     case DeleteBackup: DeleteZip(); break;

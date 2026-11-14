@@ -419,6 +419,17 @@ fs::path LoadBackupFolder() {
     return Utf16(data);
 }
 
+fs::path LoadOpenZipFolder() {
+    std::ifstream stream(Config(L"open-zip-folder.txt"), std::ios::binary);
+    const std::string data((std::istreambuf_iterator<char>(stream)), {});
+    auto folder = fs::path(Utf16(data));
+    return IsAbsolutePath(folder) ? folder : fs::path{};
+}
+
+void SaveOpenZipFolder(const fs::path& folder) {
+    WriteConfig(Config(L"open-zip-folder.txt"), Utf8(folder.native()));
+}
+
 std::vector<fs::path> LoadBackupDestinations() {
     std::ifstream input(Config(L"backup-destinations.txt"), std::ios::binary);
     if (!input) {

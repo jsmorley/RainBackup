@@ -67,6 +67,8 @@ std::vector<Source> DecodeSources(std::string_view data);
 std::vector<Source> LoadSources();
 std::vector<fs::path> LoadIgnored();
 fs::path LoadBackupFolder();
+fs::path LoadOpenZipFolder();
+void SaveOpenZipFolder(const fs::path& folder);
 std::vector<fs::path> LoadBackupDestinations();
 void SaveBackupDestinations(const std::vector<fs::path>& paths);
 bool LoadButtonTooltips();
