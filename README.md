@@ -6,7 +6,7 @@ Download the installer ZIP from [GitHub Releases](https://github.com/jsmorley/Ra
 
 ## Backup
 
-- **Scan** looks for the installed Rainmeter and running portable copies. **Scan folder** searches a folder you choose for portable installations. RainBackup remembers the sources and checkbox selections.
+- **Scan** looks for the installed Rainmeter and running portable copies. To add a portable copy that is closed, use **Add folder** and select its installation folder. RainBackup remembers the sources and checkbox selections.
 - Expand the tree to individual files. **Add folder** and **Add file** can include anything you consider part of your setup, such as your plugin SDK. Select a source to use **Change path**, **Remove folder**, or **Remove file**. Uncheck individual items inside a source to exclude them from backups.
 - Use **New** beside the scheme name to save a name, destination, and optional schedule. Each scheme has its own sources and exclusions. Select one on the main window, use **Edit** to change its settings, and click **Back up now** to create a timestamped ZIP.
 

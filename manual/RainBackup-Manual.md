@@ -21,7 +21,7 @@ RainBackup imports existing schedules as separate backups with copies of the pre
 ## Choose what to back up
 
 1. Open **Backup** and click **Scan**. RainBackup looks for the installed copy and any running portable copies it can identify. It reads Rainmeter’s configured skins path and shows the skins separately from **Settings & Plugins**.
-2. For a portable copy elsewhere, click **Scan folder…** and choose the installation folder or a parent folder to search. Repeat for other portable installations as needed.
+2. For a portable copy that isn’t running, click **Add folder…** and select the installation folder containing **Rainmeter.exe**, **Rainmeter.dll**, and **Rainmeter.ini**. RainBackup adds its skins, settings, and plugins. Repeat for each portable copy.
 3. Expand the tree to see individual folders and files. Check or uncheck a folder to apply the choice to everything under it. A dash in a checkbox means only some of its contents are selected. Use **Select all** or **Clear selection** to change the entire tree.
 4. Use **Add folder…** or **Add file…** for anything else you want to include. For example, add **C:\rainmeter-plugin-sdk** if you want the SDK in the same archive.
 5. To replace a configured path, select the source and click **Change path…**. To take an entire source off the list, select its top-level folder or file and click **Remove folder** or **Remove file**. The Yes/No prompt shows exactly which path will be removed from future backups. Your files and existing ZIPs stay in place. To skip a nested folder or file, uncheck it in the tree.
@@ -53,7 +53,7 @@ If the skins are in OneDrive, Windows may download selected online-only files as
 
 ## Restore a backup
 
-1. Install Rainmeter on the destination PC before restoring. For a portable copy that RainBackup hasn’t detected, use **Backup** → **Scan folder…** to register it.
+1. Install Rainmeter on the destination PC before restoring. For a portable copy that RainBackup hasn’t detected, use **Backup** → **Add folder…** and select its installation folder.
 2. Select a backup scheme and open **Restore**. Choose one of its ZIPs from the dropdown. **Open ZIP** starts in the folder of the last ZIP you chose through that button. If that folder is unavailable or you haven't chosen a ZIP yet, the dialog opens at the **RainBackup** group of current scheme destinations when the group is available.
 3. Expand the archive tree and check the items to restore. Click **Select all** to restore the entire backup.
 4. Choose a destination. The list shows the backup type, original location, and restore destination for each source.

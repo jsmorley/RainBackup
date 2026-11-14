@@ -236,7 +236,7 @@ bool Merge(std::vector<Source>& sources, Source source) {
 }
 
 namespace {
-std::vector<fs::path> FindPrograms(const fs::path& searchFolder) {
+std::vector<fs::path> FindPrograms() {
     std::vector<fs::path> programs;
     auto addProgram = [&](const fs::path& folder) {
         if (IsAbsolutePath(folder) && Exists(folder / L"Rainmeter.exe") &&
@@ -244,39 +244,27 @@ std::vector<fs::path> FindPrograms(const fs::path& searchFolder) {
             programs.push_back(folder);
         }
     };
-    if (searchFolder.empty()) {
-        addProgram(fs::path(KnownFolder(FOLDERID_ProgramFiles)) / L"Rainmeter");
-        addProgram(fs::path(KnownFolder(FOLDERID_ProgramFilesX86)) / L"Rainmeter");
-        for (auto key : {HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE}) {
-            for (auto view : {RRF_SUBKEY_WOW6464KEY, RRF_SUBKEY_WOW6432KEY}) {
-                addProgram(RegistryPath(key, view));
-            }
+    addProgram(fs::path(KnownFolder(FOLDERID_ProgramFiles)) / L"Rainmeter");
+    addProgram(fs::path(KnownFolder(FOLDERID_ProgramFilesX86)) / L"Rainmeter");
+    for (auto key : {HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE}) {
+        for (auto view : {RRF_SUBKEY_WOW6464KEY, RRF_SUBKEY_WOW6432KEY}) {
+            addProgram(RegistryPath(key, view));
         }
-        HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-        if (snapshot != INVALID_HANDLE_VALUE) {
-            PROCESSENTRY32W process{};
-            process.dwSize = sizeof(process);
-            for (BOOL more = Process32FirstW(snapshot, &process); more; more = Process32NextW(snapshot, &process)) {
-                if (!Same(process.szExeFile, L"Rainmeter.exe")) continue;
-                HANDLE handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, process.th32ProcessID);
-                if (!handle) continue;
-                wchar_t path[32768]{};
-                DWORD length = static_cast<DWORD>(std::size(path));
-                if (QueryFullProcessImageNameW(handle, 0, path, &length)) addProgram(fs::path(path).parent_path());
-                CloseHandle(handle);
-            }
-            CloseHandle(snapshot);
+    }
+    HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (snapshot != INVALID_HANDLE_VALUE) {
+        PROCESSENTRY32W process{};
+        process.dwSize = sizeof(process);
+        for (BOOL more = Process32FirstW(snapshot, &process); more; more = Process32NextW(snapshot, &process)) {
+            if (!Same(process.szExeFile, L"Rainmeter.exe")) continue;
+            HANDLE handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, process.th32ProcessID);
+            if (!handle) continue;
+            wchar_t path[32768]{};
+            DWORD length = static_cast<DWORD>(std::size(path));
+            if (QueryFullProcessImageNameW(handle, 0, path, &length)) addProgram(fs::path(path).parent_path());
+            CloseHandle(handle);
         }
-    } else {
-        CheckPath(searchFolder);
-        addProgram(searchFolder);
-        std::error_code error;
-        for (fs::recursive_directory_iterator it(searchFolder, fs::directory_options::skip_permission_denied, error), end;
-             !error && it != end; it.increment(error)) {
-            if (IsReparse(it->path())) it.disable_recursion_pending();
-            else if (Same(it->path().filename().native(), L"Rainmeter.exe")) addProgram(it->path().parent_path());
-        }
-        if (error) Fail(L"Could not finish scanning " + searchFolder.wstring());
+        CloseHandle(snapshot);
     }
     return programs;
 }
@@ -289,7 +277,7 @@ bool HasProgram(const fs::path& folder) {
 }
 
 bool RainmeterInstalled(const std::vector<Source>& configured) {
-    auto programs = FindPrograms({});
+    auto programs = FindPrograms();
     return std::any_of(programs.begin(), programs.end(), HasProgram) ||
         std::any_of(configured.begin(), configured.end(), [](const Source& source) {
             constexpr std::wstring_view prefix = L"Portable Rainmeter — ";
@@ -297,26 +285,27 @@ bool RainmeterInstalled(const std::vector<Source>& configured) {
         });
 }
 
-std::vector<Source> Scan(const fs::path& searchFolder) {
+std::vector<Source> PortableSources(const fs::path& folder) {
+    if (!HasProgram(folder) || !Exists(folder / L"Rainmeter.ini")) return {};
+    const auto name = L"Portable Rainmeter — " + folder.wstring();
+    return {{name, Kind::Skins, SkinPath(folder, folder / L"Skins")},
+        {name, Kind::PortableSettings, folder}};
+}
+
+std::vector<Source> Scan() {
     std::vector<Source> sources;
-    auto programs = FindPrograms(searchFolder);
-    if (searchFolder.empty()) {
-        fs::path settings = fs::path(KnownFolder(FOLDERID_RoamingAppData)) / L"Rainmeter";
-        if (Exists(settings) || std::any_of(programs.begin(), programs.end(),
-            [&](const auto& p) { return !Exists(p / L"Rainmeter.ini"); })) {
-            auto documents = fs::path(KnownFolder(FOLDERID_Documents));
-            auto fallback = documents / L"Rainmeter" / L"Skins";
-            if (!Exists(fallback) && Exists(documents / L"Skins")) fallback = documents / L"Skins";
-            Merge(sources, {L"Installed Rainmeter", Kind::Skins,
-                SkinPath(settings, fallback)});
-            Merge(sources, {L"Installed Rainmeter", Kind::Settings, settings});
-        }
+    auto programs = FindPrograms();
+    fs::path settings = fs::path(KnownFolder(FOLDERID_RoamingAppData)) / L"Rainmeter";
+    if (Exists(settings) || std::any_of(programs.begin(), programs.end(),
+        [&](const auto& p) { return !Exists(p / L"Rainmeter.ini"); })) {
+        auto documents = fs::path(KnownFolder(FOLDERID_Documents));
+        auto fallback = documents / L"Rainmeter" / L"Skins";
+        if (!Exists(fallback) && Exists(documents / L"Skins")) fallback = documents / L"Skins";
+        Merge(sources, {L"Installed Rainmeter", Kind::Skins, SkinPath(settings, fallback)});
+        Merge(sources, {L"Installed Rainmeter", Kind::Settings, settings});
     }
     for (const auto& folder : programs) {
-        if (!Exists(folder / L"Rainmeter.ini")) continue;
-        const auto name = L"Portable Rainmeter — " + folder.wstring();
-        Merge(sources, {name, Kind::Skins, SkinPath(folder, folder / L"Skins")});
-        Merge(sources, {name, Kind::PortableSettings, folder});
+        for (auto& source : PortableSources(folder)) Merge(sources, std::move(source));
     }
     return sources;
 }

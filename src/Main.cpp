@@ -24,7 +24,7 @@ constexpr int RainBackupIcon = 101;
 constexpr int HeaderLogoSize = 64;
 constexpr int ProfileRowHeight = 38;
 enum Id {
-    BackupPage = 100, RestorePage, ScanNow, ScanFolder, AddFolder, AddFile, Change, Remove, ScheduleButton,
+    BackupPage = 100, RestorePage, ScanNow, AddFolder, AddFile, Change, Remove, ScheduleButton,
     SelectAll, ClearAll, Run, Open, Original, NewLocation, Details, ZipList, TreeId, Destinations,
     ScheduleFolder, Frequency, Time, Copies, SaveTask, RemoveTask, CloseDialog,
     CancelTransfer, DeleteBackup, ShowLog, EmptyLog, MoreMenu, Help, Releases, Support,
@@ -100,8 +100,7 @@ const wchar_t* ButtonTip(int id, bool restore) {
     case BackupPage: return L"Choose the files and folders to back up.";
     case RestorePage: return L"Choose an archive for this scheme or open another ZIP.";
     case ScanNow: return L"Detect Rainmeter setups and refresh the source tree.";
-    case ScanFolder: return L"Look for portable Rainmeter installations in a folder.";
-    case AddFolder: return L"Add another folder to the backup sources.";
+    case AddFolder: return L"Add a folder or select a portable Rainmeter installation folder.";
     case AddFile: return L"Add another file to the backup sources.";
     case Change: return L"Set a new path for this backup source.";
     case Remove: return L"Remove this source from future backups.";
@@ -533,7 +532,7 @@ struct App {
         }
         zipList = Control(WC_COMBOBOXW, L"", WS_TABSTOP | CBS_DROPDOWNLIST | WS_VSCROLL, ZipList);
         const std::pair<int, const wchar_t*> labels[] = {
-            {BackupPage,L"&Backup"}, {RestorePage,L"&Restore"}, {ScanNow,L"Scan"}, {ScanFolder,L"Scan folder…"},
+            {BackupPage,L"&Backup"}, {RestorePage,L"&Restore"}, {ScanNow,L"Scan"},
             {AddFolder,L"Add folder…"}, {AddFile,L"Add file…"}, {Change,L"Change path…"}, {Remove,L"Remove folder"},
             {ShowLog,L"Log"}, {MoreMenu,L"More options"}, {SelectAll,L"Select all"}, {ClearAll,L"Clear selection"}, {Run,L"Back up now…"},
             {Open,L"Open ZIP"}, {Original,L"Original location"},
@@ -580,7 +579,7 @@ struct App {
             button(DeleteBackup, width - 140, y, 110);
         } else {
             int x = 30;
-            for (auto [id, w] : {std::pair{ScanNow,72}, {ScanFolder,112}, {AddFolder,108},
+            for (auto [id, w] : {std::pair{ScanNow,72}, {AddFolder,108},
                 {AddFile,91}, {Change,123}, {Remove,103}}) {
                 button(id, x, y, w);
                 x += w + 8;
@@ -621,7 +620,7 @@ struct App {
     void Refresh() {
         if (!tree) return;
         const bool has = Active() && !Active()->root.children.empty();
-        for (auto id : {ScanNow, ScanFolder, AddFolder, AddFile, Change, Remove, Details, NewProfile,
+        for (auto id : {ScanNow, AddFolder, AddFile, Change, Remove, Details, NewProfile,
             ScheduleButton, SaveSelection}) {
             ShowWindow(buttons[id], restorePage ? SW_HIDE : SW_SHOW);
         }
@@ -644,7 +643,7 @@ struct App {
         SetWindowTextW(buttons[Remove], selectedSource && !selectedSource->directory ? L"Remove file" : L"Remove folder");
         for (auto& [id, control] : buttons) {
             bool enabled = !busy && !loadingZip;
-            if (id == ScheduleButton || id == ScanNow || id == ScanFolder || id == AddFolder || id == AddFile) {
+            if (id == ScheduleButton || id == ScanNow || id == AddFolder || id == AddFile) {
                 enabled &= hasProfile;
             }
             if (id == CancelTransfer) enabled = transferring && !stopTransfer.stop_requested();
@@ -886,32 +885,27 @@ struct App {
         Populate();
     }
 
-    void ScanSources(fs::path folder, bool initial = false) {
-        Start(L"Scanning Rainmeter…", [this, folder = std::move(folder), initial](const Progress& progress) {
+    void ScanSources(bool initial = false) {
+        Start(L"Scanning Rainmeter…", [this, initial](const Progress& progress) {
             auto list = sources;
-            auto exclusions = ignored;
-            auto found = initial ? std::vector<Source>{} : Scan(folder);
-            size_t added = 0;
+            auto found = initial ? std::vector<Source>{} : Scan();
             for (auto& entry : found) {
                 // Respect an edited root for a known setup and content type.
                 bool configured = std::any_of(list.begin(), list.end(), [&](const Source& source) {
                     return source.setup == entry.setup && source.kind == entry.kind;
                 });
-                if (!configured && Merge(list, std::move(entry))) ++added;
+                if (!configured) Merge(list, std::move(entry));
             }
             auto model = Build(std::move(list), progress);
-            ApplyIgnored(*model, exclusions);
+            ApplyIgnored(*model, ignored);
             auto holder = std::make_shared<std::unique_ptr<Tree>>(std::move(model));
             std::wstring startupNotice;
             if (initial) {
                 try { startupNotice = LastScheduledBackup(); }
                 catch (const std::exception&) {}
             }
-            return [this, holder, exclusions = std::move(exclusions), added, initial, folder,
-                startupNotice = std::move(startupNotice)] {
-                ignored = exclusions;
-                Adopt(std::move(*holder), !initial && !folder.empty() && !added
-                    ? L"No new portable Rainmeter setups found." : startupNotice);
+            return [this, holder, startupNotice = std::move(startupNotice)] {
+                Adopt(std::move(*holder), startupNotice);
             };
         });
     }
@@ -945,7 +939,7 @@ struct App {
         ShowProfileArchives();
         Populate();
         if (!profile) return;
-        if (startup) ScanSources({}, true);
+        if (startup) ScanSources(true);
         else Rebuild(sources);
     }
 
@@ -1096,7 +1090,7 @@ struct App {
 
     void RunRestore() {
         if (!opened.tree) return;
-        if (!RainmeterInstalled(sources)) Fail(L"Install Rainmeter first, or use Backup → Scan folder to register a portable installation.");
+        if (!RainmeterInstalled(sources)) Fail(L"Install Rainmeter first, or use Backup → Add folder to add a portable installation.");
         auto plan = PlanRestore(opened, targets, !original);
         std::wstring mapping;
         for (const auto& target : plan.destinations) {
@@ -1436,18 +1430,26 @@ void App::Command(int id, int notification) {
         Populate();
         break;
     case ScanNow:
-        ScanSources({});
+        ScanSources();
         break;
-    case ScanFolder: {
-        auto folder = Browse(window, Picker::Folder);
-        if (!folder.empty()) ScanSources(folder);
-        break;
-    }
     case AddFile:
     case AddFolder: {
         auto path = Browse(window, id == AddFile ? Picker::Open : Picker::Folder);
         if (path.empty()) break;
         auto list = sources;
+        auto portable = id == AddFolder ? PortableSources(path) : std::vector<Source>{};
+        if (!portable.empty()) {
+            bool added = false;
+            for (auto& entry : portable) {
+                const bool configured = std::any_of(list.begin(), list.end(), [&](const Source& source) {
+                    return source.setup == entry.setup && source.kind == entry.kind;
+                });
+                if (!configured && Merge(list, std::move(entry))) added = true;
+            }
+            if (!added) Fail(L"This portable Rainmeter installation is already in the list.");
+            if (Confirm(window, L"Add this portable Rainmeter installation?", path.wstring())) Rebuild(std::move(list));
+            break;
+        }
         auto item = Selected();
         auto setup = item ? (item->parent == &backup->root ? item->name : backup->sources.at(item->source).setup)
             : L"Additional sources";

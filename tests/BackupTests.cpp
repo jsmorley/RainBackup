@@ -28,6 +28,16 @@ int main() {
     try {
         auto nonce = std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(GetTickCount64());
         workspace /= nonce;
+        const auto portable = workspace / L"Portable Rainmeter";
+        Require(PortableSources(portable).empty(), "ordinary folder detected as portable Rainmeter");
+        Write(portable / L"Rainmeter.exe", "fixture");
+        Write(portable / L"Rainmeter.dll", "fixture");
+        Write(portable / L"Rainmeter.ini", "[Rainmeter]\r\n");
+        const auto portableSources = PortableSources(portable);
+        Require(portableSources.size() == 2 &&
+            portableSources[0].kind == Kind::Skins && EqualPath(portableSources[0].path, portable / L"Skins") &&
+            portableSources[1].kind == Kind::PortableSettings && EqualPath(portableSources[1].path, portable),
+            "portable folder did not provide the expected backup sources");
         auto skins = workspace / L"Old Account" / L"Skins";
         auto settings = workspace / L"Old Account" / L"Settings";
         Write(skins / L"Clock" / L"Clock.ini", "clock");
