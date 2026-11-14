@@ -7,8 +7,6 @@
 #include <commctrl.h>
 #include <chrono>
 #include <windowsx.h>
-#include <d2d1.h>
-#include <dwrite.h>
 #include <dwmapi.h>
 #include <shlobj.h>
 #include <shellapi.h>
@@ -25,14 +23,13 @@ constexpr UINT Finished = WM_APP + 1, ProgressUpdate = WM_APP + 2;
 constexpr int RainBackupIcon = 101;
 constexpr int HeaderLogoSize = 64;
 constexpr int ProfileRowHeight = 38;
-constexpr wchar_t DestinationArrow[] = L"⬆️";
 enum Id {
     BackupPage = 100, RestorePage, ScanNow, ScanFolder, AddFolder, AddFile, Change, Remove, ScheduleButton,
     SelectAll, ClearAll, Run, Open, Original, NewLocation, Details, ZipList, TreeId, Destinations,
     ScheduleFolder, Frequency, Time, Copies, SaveTask, RemoveTask, CloseDialog,
-    BackupPath, CancelTransfer, DeleteBackup, ShowLog, EmptyLog, MoreMenu, Help, Releases, Support,
+    CancelTransfer, DeleteBackup, ShowLog, EmptyLog, MoreMenu, Help, Releases, Support,
     ScheduleSavedFolders, ToggleTooltips, ToggleDarkMode, ProfileChoice, NewProfile, Time12Hour, Time24Hour,
-    OpenBackupDestination, SaveSelection
+    SaveSelection
 };
 
 std::wstring DisplayTime(std::wstring_view time, bool use24Hour) {
@@ -59,6 +56,25 @@ std::wstring DisplayLogTimes(std::wstring_view text, bool use24Hour) {
         } else result += line;
         if (end < text.size()) result += L'\n';
         start = end + 1;
+    }
+    return result;
+}
+
+std::wstring NewestLogEntriesFirst(std::wstring_view text) {
+    std::vector<std::wstring_view> entries;
+    for (size_t start = 0; start < text.size();) {
+        const auto separator = text.find(L"\r\n\r\n", start);
+        const auto end = separator == text.npos ? text.size() : separator + 4;
+        entries.push_back(text.substr(start, end - start));
+        start = end;
+    }
+    std::wstring result;
+    result.reserve(text.size());
+    for (auto entry = entries.rbegin(); entry != entries.rend(); ++entry) {
+        result += *entry;
+        if (entry + 1 != entries.rend() && !entry->ends_with(L"\r\n\r\n")) {
+            result += entry->ends_with(L"\r\n") ? L"\r\n" : L"\r\n\r\n";
+        }
     }
     return result;
 }
@@ -98,7 +114,6 @@ const wchar_t* ButtonTip(int id, bool restore) {
     case SaveSelection: return L"Save the current file and folder selection for this backup.";
     case Run: return restore ? L"Review the selected files and restore destinations." : L"Review and create a new backup ZIP.";
     case Open: return L"Browse for a backup ZIP, including in saved destinations.";
-    case OpenBackupDestination: return L"Open the backup destination in Windows Explorer.";
     case Original: return L"Restore to the paths recorded in the ZIP.";
     case NewLocation: return L"Choose one folder for the restored files.";
     case Details: return L"Show unreadable paths and skipped links from the scan.";
@@ -340,7 +355,7 @@ struct ProgressMessage {
 
 struct App {
     HWND window{}, tree{}, title{}, sub{}, detail{}, status{}, summary{}, zipList{}, destinations{}, mode{},
-        backupPath{}, backupPathLabel{}, progressBar{}, percentLabel{};
+        progressBar{}, percentLabel{};
     HFONT regular{}, heading{}, section{}, profileFont{};
     HIMAGELIST checks{}, icons{};
     HINSTANCE instance{};
@@ -349,7 +364,6 @@ struct App {
     std::optional<bool> darkMode;
     bool use24Hour = true;
     HICON headerIcon{};
-    RECT backupField{};
     Palette palette;
     int dpi = 96;
     bool restorePage = false, busy = false, original = false, updating = false;
@@ -500,7 +514,6 @@ struct App {
         percentLabel = Control(L"STATIC", L"", SS_RIGHT | SS_NOPREFIX);
         SendMessageW(progressBar, PBM_SETRANGE32, 0, 100);
         mode = Control(L"STATIC", L"", SS_NOPREFIX | SS_PATHELLIPSIS);
-        backupPathLabel = Control(L"STATIC", L"Backup destination", SS_NOPREFIX);
         savedFolders = LoadBackupDestinations();
         lastFolder = LoadBackupFolder();
         if (lastFolder.empty()) lastFolder = KnownFolder(FOLDERID_Documents);
@@ -508,9 +521,6 @@ struct App {
         profileChoice = Control(WC_COMBOBOXW, L"",
             WS_TABSTOP | CBS_DROPDOWNLIST | CBS_OWNERDRAWFIXED | CBS_HASSTRINGS | WS_VSCROLL, ProfileChoice);
         RefreshProfiles();
-        backupPath = Control(L"EDIT", L"",
-            WS_TABSTOP | ES_AUTOHSCROLL | ES_READONLY, BackupPath);
-        SendMessageW(backupPath, EM_SETLIMITTEXT, 32767, 0);
         tree = Control(WC_TREEVIEWW, L"", WS_TABSTOP | TVS_HASBUTTONS | TVS_HASLINES | TVS_LINESATROOT |
             TVS_SHOWSELALWAYS | TVS_DISABLEDRAGDROP | TVS_INFOTIP, TreeId);
         TreeView_SetExtendedStyle(tree, TVS_EX_DOUBLEBUFFER, TVS_EX_DOUBLEBUFFER);
@@ -531,7 +541,7 @@ struct App {
             {Open,L"Open ZIP"}, {Original,L"Original location"},
             {NewLocation,L"New location"}, {Details,L"Scan issues…"},
             {NewProfile,L"New"}, {ScheduleButton,L"Edit"}, {CancelTransfer,L"Cancel"}, {DeleteBackup,L"Delete ZIP"},
-            {OpenBackupDestination,DestinationArrow}, {SaveSelection,L"Save"}
+            {SaveSelection,L"Save"}
         };
         showTooltips = LoadButtonTooltips();
         darkMode = LoadDarkMode();
@@ -584,7 +594,7 @@ struct App {
         button(SelectAll, width - 252 - saveWidth, y, 95, 31);
         button(ClearAll, width - 149 - saveWidth, y, 119, 31);
         if (!restorePage) button(SaveSelection, width - 102, y, 72, 31);
-        int lower = height - (restorePage ? 256 : 151);
+        int lower = height - (restorePage ? 256 : 101);
         place(tree, 30, y + 42, width - 60, std::max(80, lower - y - 42));
         if (restorePage) {
             place(mode, 30, lower + 10, width - 60, 23);
@@ -599,19 +609,6 @@ struct App {
         } else {
             place(detail, 30, lower + 7, width - 195, 25);
             button(Details, width - 149, lower + 2, 119, 30);
-            button(OpenBackupDestination, 30, lower + 42, 27, 29);
-            place(backupPathLabel, 64, lower + 47, 130, 25);
-            backupField = {Px(196), Px(lower + 43), Px(width - 30), Px(lower + 72)};
-            HDC dc = GetDC(backupPath);
-            auto previous = SelectObject(dc, regular);
-            TEXTMETRICW metrics{};
-            GetTextMetricsW(dc, &metrics);
-            SelectObject(dc, previous);
-            ReleaseDC(backupPath, dc);
-            const int fieldHeight = backupField.bottom - backupField.top;
-            const int textHeight = std::clamp<int>(metrics.tmHeight + 1, 1, fieldHeight - 2);
-            MoveWindow(backupPath, backupField.left + Px(5), backupField.top + (fieldHeight - textHeight) / 2,
-                backupField.right - backupField.left - Px(10), textHeight, TRUE);
         }
         InvalidateRect(window, nullptr, TRUE);
         place(status, 30, height - (transferring ? 57 : 46), width - 242, 21);
@@ -627,7 +624,7 @@ struct App {
         if (!tree) return;
         const bool has = Active() && !Active()->root.children.empty();
         for (auto id : {ScanNow, ScanFolder, AddFolder, AddFile, Change, Remove, Details, NewProfile,
-            ScheduleButton, OpenBackupDestination, SaveSelection}) {
+            ScheduleButton, SaveSelection}) {
             ShowWindow(buttons[id], restorePage ? SW_HIDE : SW_SHOW);
         }
         for (auto id : {Open, Original, NewLocation, DeleteBackup}) {
@@ -639,14 +636,11 @@ struct App {
             ShowWindow(control, restorePage && !loadingZip ? SW_SHOW : SW_HIDE);
         }
         ShowWindow(detail, restorePage ? SW_HIDE : SW_SHOW);
-        ShowWindow(backupPathLabel, restorePage ? SW_HIDE : SW_SHOW);
-        ShowWindow(backupPath, restorePage ? SW_HIDE : SW_SHOW);
         ShowWindow(progressBar, transferring ? SW_SHOW : SW_HIDE);
         ShowWindow(percentLabel, transferring ? SW_SHOW : SW_HIDE);
         ShowWindow(buttons[CancelTransfer], transferring ? SW_SHOW : SW_HIDE);
         ShowWindow(buttons[Run], transferring ? SW_HIDE : SW_SHOW);
         const bool hasProfile = !profiles.empty();
-        EnableWindow(backupPath, !busy && hasProfile);
         EnableWindow(profileChoice, !busy && !loadingZip && hasProfile);
         auto selectedSource = SelectedSource();
         SetWindowTextW(buttons[Remove], selectedSource && !selectedSource->directory ? L"Remove file" : L"Remove folder");
@@ -655,7 +649,6 @@ struct App {
             if (id == ScheduleButton || id == ScanNow || id == ScanFolder || id == AddFolder || id == AddFile) {
                 enabled &= hasProfile;
             }
-            if (id == OpenBackupDestination) enabled &= hasProfile && !profiles.at(activeProfile).schedule.folder.empty();
             if (id == CancelTransfer) enabled = transferring && !stopTransfer.stop_requested();
             if (id == SelectAll || id == ClearAll) enabled &= has;
             if (id == SaveSelection) enabled &= hasProfile && backup != nullptr;
@@ -948,7 +941,6 @@ struct App {
     void SelectProfile(size_t index, bool startup = false) {
         activeProfile = index;
         const auto* profile = profiles.empty() ? nullptr : &profiles.at(index);
-        SetWindowTextW(backupPath, profile ? profile->schedule.folder.c_str() : L"");
         sources = profile ? profile->sources : std::vector<Source>{};
         ignored = profile ? profile->excluded : std::vector<fs::path>{};
         backup.reset();
@@ -1234,9 +1226,9 @@ struct ScheduleDialog {
     }
 
     void RefreshLog() {
-        const auto shown = DisplayLogTimes(logContents, app.use24Hour);
+        const auto shown = DisplayLogTimes(NewestLogEntriesFirst(logContents), app.use24Hour);
         SetWindowTextW(logText, shown.empty() ? L"No operations recorded yet." : shown.c_str());
-        SendMessageW(logText, EM_SETSEL, shown.size(), shown.size());
+        SendMessageW(logText, EM_SETSEL, 0, 0);
         SendMessageW(logText, EM_SCROLLCARET, 0, 0);
         EnableWindow(emptyLog, !logContents.empty());
     }
@@ -1530,7 +1522,7 @@ void App::Command(int id, int notification) {
         if (restorePage || !backup || profiles.empty()) break;
         try {
             RecordSelection();
-            notice = L"Saved current selection";
+            notice = L"Saved folder / file selection for backup scheme " + profiles.at(activeProfile).name;
         } catch (const std::exception&) {
             notice = L"Could not save the selection for " + profiles.at(activeProfile).name + L".";
         }
@@ -1582,16 +1574,6 @@ void App::Command(int id, int notification) {
         break;
     }
     case ScheduleButton: EditProfile(false); break;
-    case OpenBackupDestination: {
-        if (restorePage || profiles.empty()) break;
-        const auto& folder = profiles.at(activeProfile).schedule.folder;
-        std::error_code error;
-        if (!fs::is_directory(folder, error) ||
-            reinterpret_cast<INT_PTR>(ShellExecuteW(window, L"explore", folder.c_str(), nullptr, nullptr, SW_SHOWNORMAL)) <= 32) {
-            Fail(L"Could not open the backup destination in Windows Explorer.\n\n" + folder.wstring());
-        }
-        break;
-    }
     case MoreMenu: {
         auto menu = CreatePopupMenu();
         if (!menu) Fail(L"Could not open the RainBackup menu.");
@@ -1682,64 +1664,6 @@ void App::Command(int id, int notification) {
     }
 }
 
-void DrawDestinationArrow(const DRAWITEMSTRUCT& item, const App& app) {
-    using Microsoft::WRL::ComPtr;
-
-    const RECT& bounds = item.rcItem;
-    const auto& palette = app.palette;
-    const bool disabled = item.itemState & ODS_DISABLED;
-    const COLORREF ink = disabled ? palette.quiet : palette.text;
-    auto color = [](COLORREF value) {
-        return D2D1::ColorF(GetRValue(value) / 255.0f, GetGValue(value) / 255.0f, GetBValue(value) / 255.0f);
-    };
-    auto drawEmoji = [&] {
-        ComPtr<ID2D1Factory> graphics;
-        ComPtr<IDWriteFactory> fonts;
-        ComPtr<IDWriteTextFormat> format;
-        ComPtr<ID2D1DCRenderTarget> target;
-        ComPtr<ID2D1SolidColorBrush> brush;
-        const auto properties = D2D1::RenderTargetProperties(D2D1_RENDER_TARGET_TYPE_DEFAULT,
-            D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_IGNORE), 96.0f, 96.0f);
-        if (FAILED(D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, graphics.GetAddressOf())) ||
-            FAILED(DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory),
-                reinterpret_cast<IUnknown**>(fonts.GetAddressOf()))) ||
-            FAILED(fonts->CreateTextFormat(L"Segoe UI Emoji", nullptr, DWRITE_FONT_WEIGHT_NORMAL,
-                DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, static_cast<float>(app.Px(18)),
-                L"en-US", format.GetAddressOf())) ||
-            FAILED(graphics->CreateDCRenderTarget(&properties, target.GetAddressOf())) ||
-            FAILED(target->BindDC(item.hDC, &bounds)) ||
-            FAILED(target->CreateSolidColorBrush(color(ink), brush.GetAddressOf()))) return false;
-
-        format->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
-        format->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
-        target->BeginDraw();
-        target->Clear(color(palette.bg));
-        target->DrawText(DestinationArrow, static_cast<UINT32>(std::size(DestinationArrow) - 1),
-            format.Get(), D2D1::RectF(0, 0, static_cast<float>(bounds.right - bounds.left),
-                static_cast<float>(bounds.bottom - bounds.top)), brush.Get(),
-            disabled ? D2D1_DRAW_TEXT_OPTIONS_NONE : D2D1_DRAW_TEXT_OPTIONS_ENABLE_COLOR_FONT);
-        return SUCCEEDED(target->EndDraw());
-    };
-
-    if (!drawEmoji()) {
-        FillRect(item.hDC, &bounds, palette.background);
-        SetBkMode(item.hDC, TRANSPARENT);
-        SetTextColor(item.hDC, ink);
-        const auto previous = SelectObject(item.hDC, app.regular);
-        RECT textBounds = bounds;
-        DrawTextW(item.hDC, DestinationArrow, -1, &textBounds, DT_SINGLELINE | DT_CENTER | DT_VCENTER);
-        SelectObject(item.hDC, previous);
-    }
-    if (!disabled && (item.itemState & ODS_SELECTED ||
-        (item.itemState & ODS_FOCUS && !(item.itemState & ODS_NOFOCUSRECT)))) {
-        RECT underline{bounds.left + app.Px(6), bounds.bottom - app.Px(3),
-            bounds.right - app.Px(6), bounds.bottom - app.Px(2)};
-        auto brush = CreateSolidBrush(palette.accent);
-        FillRect(item.hDC, &underline, brush);
-        DeleteObject(brush);
-    }
-}
-
 LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
     auto app = reinterpret_cast<App*>(GetWindowLongPtrW(window, GWLP_USERDATA));
     if (message == WM_NCCREATE) {
@@ -1754,7 +1678,7 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
         case WM_SIZE: if (app->tree) app->Layout(); return 0;
         case WM_GETMINMAXINFO: {
             auto info = reinterpret_cast<MINMAXINFO*>(lp);
-            info->ptMinTrackSize = {app->Px(775), app->Px(712)};
+            info->ptMinTrackSize = {app->Px(775), app->Px(680)};
             return 0;
         }
         case WM_DPICHANGED: {
@@ -1771,22 +1695,8 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
             auto dc = BeginPaint(window, &paint);
             if (app->headerIcon) DrawIconEx(dc, app->Px(30), app->Px(20), app->headerIcon,
                 app->Px(HeaderLogoSize), app->Px(HeaderLogoSize), 0, nullptr, DI_NORMAL);
-            if (!app->restorePage && app->backupPath) {
-                FillRect(dc, &app->backupField, app->palette.surface);
-                auto border = CreateSolidBrush(GetFocus() == app->backupPath ? app->palette.accent : app->palette.border);
-                FrameRect(dc, &app->backupField, border);
-                DeleteObject(border);
-            }
             EndPaint(window, &paint);
             return 0;
-        }
-        case WM_LBUTTONDOWN: {
-            POINT point{GET_X_LPARAM(lp), GET_Y_LPARAM(lp)};
-            if (!app->restorePage && IsWindowEnabled(app->backupPath) && PtInRect(&app->backupField, point)) {
-                SetFocus(app->backupPath);
-                return 0;
-            }
-            break;
         }
         case WM_SETTINGCHANGE:
         case WM_THEMECHANGED:
@@ -1795,11 +1705,6 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
         case WM_CTLCOLORSTATIC: {
             auto dc = reinterpret_cast<HDC>(wp);
             auto child = reinterpret_cast<HWND>(lp);
-            if (child == app->backupPath) {
-                SetTextColor(dc, app->palette.quiet);
-                SetBkColor(dc, app->palette.panel);
-                return reinterpret_cast<LRESULT>(app->palette.surface);
-            }
             SetTextColor(dc, child == app->title || child == app->summary ? app->palette.text : app->palette.quiet);
             SetBkMode(dc, TRANSPARENT);
             return reinterpret_cast<LRESULT>(app->palette.background);
@@ -1844,10 +1749,6 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
             }
             if (row->CtlType != ODT_BUTTON) break;
             auto id = row->CtlID;
-            if (id == OpenBackupDestination) {
-                DrawDestinationArrow(*row, *app);
-                return TRUE;
-            }
             auto r = row->rcItem;
             auto& p = app->palette;
             bool disabled = row->itemState & ODS_DISABLED;
@@ -1930,9 +1831,6 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
             break;
         }
         case WM_COMMAND:
-            if (LOWORD(wp) == BackupPath && (HIWORD(wp) == EN_SETFOCUS || HIWORD(wp) == EN_KILLFOCUS)) {
-                InvalidateRect(window, &app->backupField, FALSE);
-            }
             app->Command(LOWORD(wp), HIWORD(wp));
             return 0;
         case ProgressUpdate: {
@@ -2040,7 +1938,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR arguments, int show) {
     UINT dpi = GetDpiForSystem();
     auto window = CreateWindowExW(WS_EX_CONTROLPARENT, wc.lpszClassName, L"RainBackup " RAINBACKUP_VERSION,
         WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN, CW_USEDEFAULT, CW_USEDEFAULT,
-        MulDiv(965, dpi, 96), MulDiv(790, dpi, 96), nullptr, nullptr, instance, &app);
+        MulDiv(965, dpi, 96), MulDiv(700, dpi, 96), nullptr, nullptr, instance, &app);
     if (!window) { CoUninitialize(); return 1; }
     ShowWindow(window, show);
     UpdateWindow(window);

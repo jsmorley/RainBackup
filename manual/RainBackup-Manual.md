@@ -45,7 +45,7 @@ Use `Backup` or `Restore` after the name of a saved scheme. Quote names with spa
 
 ## Create a backup ZIP
 
-1. Select a named backup. Click the up arrow beside **Backup destination** to open the folder in Windows Explorer. Use **Edit** to change the destination.
+1. Select a named backup. Use **Edit** to view or change its destination.
 2. Click **Back up now…** and review the confirmation. RainBackup names the ZIP using the backup name and local time, for example **RainBackup-Skins-2026-11-14-18-00-00.zip**, and shows the full path when it finishes.
 3. Watch the progress bar and current path. Click **Cancel** to discard the unfinished ZIP. If the operation is canceled or fails before the new archive is saved, any existing ZIP at that path stays in place.
 
