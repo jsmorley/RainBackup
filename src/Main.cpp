@@ -130,7 +130,7 @@ std::wstring Text(HWND control) {
 }
 
 bool Confirm(HWND window, const std::wstring& heading, const std::wstring& details = {},
-    bool destructive = false) {
+    bool destructive = false, const wchar_t* checkbox = nullptr, BOOL* checked = nullptr) {
     TASKDIALOGCONFIG dialog{};
     dialog.cbSize = sizeof(dialog);
     dialog.hwndParent = window;
@@ -140,10 +140,16 @@ bool Confirm(HWND window, const std::wstring& heading, const std::wstring& detai
     dialog.pszMainIcon = destructive ? TD_WARNING_ICON : TD_INFORMATION_ICON;
     dialog.pszMainInstruction = heading.c_str();
     dialog.pszContent = details.empty() ? nullptr : details.c_str();
+    dialog.pszVerificationText = checkbox;
     dialog.nDefaultButton = IDNO;
     dialog.cxWidth = 360;
     int choice = IDNO;
-    if (SUCCEEDED(TaskDialogIndirect(&dialog, &choice, nullptr, nullptr))) return choice == IDYES;
+    BOOL verification = FALSE;
+    if (checked) *checked = FALSE;
+    if (SUCCEEDED(TaskDialogIndirect(&dialog, &choice, nullptr, checked ? &verification : nullptr))) {
+        if (checked) *checked = choice == IDYES && verification;
+        return choice == IDYES;
+    }
     const auto fallback = details.empty() ? heading : heading + L"\n\n" + details;
     return MessageBoxW(window, fallback.c_str(), L"RainBackup",
         MB_YESNO | MB_DEFBUTTON2 | (destructive ? MB_ICONWARNING : MB_ICONQUESTION)) == IDYES;
@@ -1237,8 +1243,6 @@ struct ScheduleDialog {
             break;
         }
         case RemoveTask: {
-            if (!Confirm(dialog, L"Remove this named backup?",
-                profile.name + (profile.automatic ? L"\n\nIts automatic schedule will also be removed." : L""), true)) break;
             const auto& destination = profile.schedule.folder;
             std::vector<fs::path> archives;
             std::error_code error;
@@ -1246,22 +1250,29 @@ struct ScheduleDialog {
             for (fs::directory_iterator it = error ? fs::directory_iterator{} : fs::directory_iterator(destination, error), end;
                 !error && it != end; it.increment(error)) {
                 const auto& path = it->path();
-                if (!IsProfileArchive(path, profile.schedule.id) || IsReparse(path) || !it->is_regular_file(error)) continue;
+                if (IsReparse(path) || !it->is_regular_file(error) || !IsProfileArchive(path, profile.schedule.id)) continue;
                 try {
                     if (ReadZip(path).originalLocations) archives.push_back(path);
                 } catch (const std::exception&) {
                     // Leave files we cannot verify as RainBackup archives in place.
                 }
             }
-            const bool deleteArchives = !error && !archives.empty() && Confirm(dialog,
-                L"Permanently delete " + std::to_wstring(archives.size()) + L" backup ZIP file(s)?",
-                profile.name + L"\n" + destination.wstring() + L"\n\nChoose No to keep them.", true);
+            auto details = profile.name + (profile.automatic ? L"\n\nIts automatic schedule will also be removed." : L"");
+            const bool canDelete = !error && !archives.empty();
+            if (canDelete) {
+                details += L"\n\nChecking the box permanently deletes " + std::to_wstring(archives.size()) +
+                    L" matching ZIP file(s) in:\n" + destination.wstring();
+            } else if (error) {
+                details += L"\n\nThe destination could not be inspected. Its ZIP files will be kept.";
+            }
+            BOOL deleteArchives = FALSE;
+            if (!Confirm(dialog, L"Remove this named backup?", details, true,
+                canDelete ? L"Remove all .zip files as well" : nullptr, &deleteArchives)) break;
             if (deleteArchives) CheckPath(destination);
             if (profile.automatic) DeleteSchedule(profile.schedule.id);
             DeleteBackupProfile(profile.schedule.id);
             removed = true;
             open = false;
-            if (error) Message(dialog, L"The backup was removed. Its destination could not be inspected, so its ZIPs were kept.", MB_ICONWARNING);
             if (!deleteArchives) break;
             app.opened = {};
             size_t failed = 0;

@@ -61,7 +61,7 @@ When a relocated restore includes **Rainmeter.ini** and a skins destination is m
 
 Windows Task Scheduler runs automatic backups under your signed-in account and catches up with one current backup after missed runs. Retention applies to both automatic and on-demand runs of that named backup. Manual-only backups keep all copies.
 
-Switch to **Manual only** to stop automatic runs. In **Edit**, choose **Remove backup…** to remove the definition and its schedule. If matching ZIPs are found in its current destination, a separate prompt offers to delete them permanently. Choose **No** to keep the ZIPs. You can still open them with **Open ZIP**.
+Switch to **Manual only** to stop automatic runs. In **Edit**, choose **Remove backup…** to remove the definition and its schedule. If matching ZIPs are found in its current destination, check **Remove all .zip files as well** to delete them permanently. The box starts unchecked. You can open any ZIPs you keep with **Open ZIP**.
 
 ## View or empty the operation log
 
