@@ -25,6 +25,10 @@ Use **Edit** to choose manual only, daily, or Monday. Automatic backups keep a c
 
 Open **Log** on the main window for dated backup and restore results. **Empty log** clears the history after confirmation.
 
+## Command line
+
+Run `RainBackup.exe "Scheme name" Backup` to back up a saved scheme, or `RainBackup.exe "Scheme name" Restore` to restore its newest ZIP to the original locations. Both commands run silently. See the [command-line manual](manual/RainBackup-Manual.md#command-line) for exit codes and restore behavior.
+
 ## Build
 
 Configure with `cmake -S . -B build -A x64`, then run `cmake --build build --config Release` and `ctest --test-dir build -C Release --output-on-failure`. To build the installer, create the `dist` folder and compile `installer/RainBackup.nsi` with NSIS.

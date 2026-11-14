@@ -80,4 +80,22 @@ std::wstring RainmeterSession::Restart() {
     stopped_.clear();
     return failures.empty() ? failures : L"Could not restart Rainmeter. Start it manually:\n" + failures;
 }
+
+void RestoreWithRainmeterRestart(const OpenZip& archive, const RestorePlan& plan,
+    const Progress& progress, const Transfer& transfer) {
+    RainmeterSession session;
+    std::exception_ptr error;
+    try {
+        if (transfer.stop.stop_requested()) throw Cancelled("Restore canceled before writing any files.");
+        session.Stop(progress);
+        Restore(archive, plan, transfer);
+    } catch (...) { error = std::current_exception(); }
+    auto restart = session.Restart();
+    if (error) {
+        if (restart.empty()) std::rethrow_exception(error);
+        try { std::rethrow_exception(error); }
+        catch (const std::exception& failure) { Fail(Utf16(failure.what()) + L"\n\n" + restart); }
+    }
+    if (!restart.empty()) Fail(restart);
+}
 }

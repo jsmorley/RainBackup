@@ -1,4 +1,5 @@
 #include "Archive.h"
+#include "CommandLine.h"
 #include "RainmeterSession.h"
 #include "Schedule.h"
 #include "SetupSession.h"
@@ -1129,20 +1130,7 @@ struct App {
             L"\n\nSelected folders will be created as needed. Rainmeter will close and restart if it is running."
             L"\n\nRestore destinations" + mapping, plan.overwrites != 0)) return;
         Start(L"Preparing restore…", [this, plan = std::move(plan)](const Progress& progress, const Transfer& transfer) {
-            RainmeterSession session;
-            std::exception_ptr error;
-            try {
-                if (transfer.stop.stop_requested()) throw Cancelled("Restore canceled before writing any files.");
-                session.Stop(progress);
-                Restore(opened, plan, transfer);
-            } catch (...) { error = std::current_exception(); }
-            auto restart = session.Restart();
-            if (error) {
-                if (restart.empty()) std::rethrow_exception(error);
-                try { std::rethrow_exception(error); }
-                catch (const std::exception& failure) { Fail(Utf16(failure.what()) + L"\n\n" + restart); }
-            }
-            if (!restart.empty()) Fail(restart);
+            RestoreWithRainmeterRestart(opened, plan, progress, transfer);
             return [this, count = plan.files] {
                 notice = L"Restore completed";
                 Message(window, std::to_wstring(count) + L" file(s) restored.");
@@ -1979,6 +1967,11 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR arguments, int show) {
         return result;
     }
     CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
+    if (args.find_first_not_of(L" \t") != args.npos) {
+        const int result = RunNamedCommand();
+        CoUninitialize();
+        return result;
+    }
     INITCOMMONCONTROLSEX controls{sizeof(controls), ICC_TREEVIEW_CLASSES | ICC_LISTVIEW_CLASSES |
         ICC_STANDARD_CLASSES | ICC_PROGRESS_CLASS};
     InitCommonControlsEx(&controls);

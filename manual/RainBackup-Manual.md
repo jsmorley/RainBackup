@@ -28,6 +28,19 @@ RainBackup imports existing schedules as separate backups with copies of the pre
 
 RainBackup remembers your sources and checkbox choices. Review **Scan issues…** if the scan reports unavailable paths or skipped links. Use **Scan** before a manual backup if you’ve added or removed files since the tree was loaded.
 
+## Command line
+
+```powershell
+$exe = 'C:\Program Files\RainBackup\RainBackup.exe'
+$run = Start-Process -FilePath $exe -ArgumentList '"My scheme" Backup' -Wait -PassThru
+$run.ExitCode
+```
+
+Use `Backup` or `Restore` after the name of a saved scheme. Quote names with spaces. Both commands run without a window, prompts, or console output. The exit code is `0` for success, `1` for an operation failure, or `2` for invalid arguments. Operation details appear in **Log**.
+
+- **Backup** uses the scheme's saved sources, exclusions, destination, and retention settings.
+- **Restore** restores all entries from the scheme's newest ZIP in its current destination to their original locations, overwriting existing files without prompting. RainBackup closes and restarts Rainmeter as needed.
+
 ## Create a backup ZIP
 
 1. Select a named backup. Click the up arrow beside **Backup destination** to open the folder in Windows Explorer. Use **Edit** to change the destination.
