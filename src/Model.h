@@ -69,8 +69,6 @@ std::vector<fs::path> LoadIgnored();
 fs::path LoadBackupFolder();
 fs::path LoadOpenZipFolder();
 void SaveOpenZipFolder(const fs::path& folder);
-std::vector<fs::path> LoadBackupDestinations();
-void SaveBackupDestinations(const std::vector<fs::path>& paths);
 bool LoadButtonTooltips();
 void SaveButtonTooltips(bool enabled);
 std::optional<bool> LoadDarkMode();

@@ -430,27 +430,6 @@ void SaveOpenZipFolder(const fs::path& folder) {
     WriteConfig(Config(L"open-zip-folder.txt"), Utf8(folder.native()));
 }
 
-std::vector<fs::path> LoadBackupDestinations() {
-    std::ifstream input(Config(L"backup-destinations.txt"), std::ios::binary);
-    if (!input) {
-        auto previous = LoadBackupFolder();
-        return previous.empty() ? std::vector<fs::path>{} : std::vector<fs::path>{previous};
-    }
-    std::vector<fs::path> paths;
-    std::string line;
-    while (std::getline(input, line)) {
-        auto path = fs::path(Utf16(line));
-        if (IsAbsolutePath(path)) paths.push_back(std::move(path));
-    }
-    return paths;
-}
-
-void SaveBackupDestinations(const std::vector<fs::path>& paths) {
-    std::string data;
-    for (const auto& path : paths) data += Utf8(path.native()) + '\n';
-    WriteConfig(Config(L"backup-destinations.txt"), data);
-}
-
 bool LoadButtonTooltips() {
     std::ifstream input(Config(L"button-tooltips.txt"), std::ios::binary);
     return input.get() != '0';

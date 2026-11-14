@@ -28,7 +28,7 @@ enum Id {
     SelectAll, ClearAll, Run, Open, Original, NewLocation, Details, ZipList, TreeId, Destinations,
     ScheduleFolder, Frequency, Time, Copies, SaveTask, RemoveTask, CloseDialog,
     CancelTransfer, DeleteBackup, ShowLog, EmptyLog, MoreMenu, Help, Releases, Support,
-    ScheduleSavedFolders, ToggleTooltips, ToggleDarkMode, ProfileChoice, NewProfile, Time12Hour, Time24Hour,
+    ToggleTooltips, ToggleDarkMode, ProfileChoice, NewProfile, Time12Hour, Time24Hour,
     SaveSelection
 };
 
@@ -113,12 +113,11 @@ const wchar_t* ButtonTip(int id, bool restore) {
     case ClearAll: return L"Uncheck everything in the tree.";
     case SaveSelection: return L"Save the current file and folder selection for this scheme.";
     case Run: return restore ? L"Review the selected files and restore destinations." : L"Review and create a new backup ZIP.";
-    case Open: return L"Browse for a backup ZIP, including in saved destinations.";
+    case Open: return L"Browse for a backup ZIP, including in scheme destinations.";
     case Original: return L"Restore to the paths recorded in the ZIP.";
     case NewLocation: return L"Choose one folder for the restored files.";
     case Details: return L"Show unreadable paths and skipped links from the scan.";
     case ScheduleFolder: return L"Browse for the folder this scheme will use.";
-    case ScheduleSavedFolders: return L"Choose a saved backup destination.";
     case CancelTransfer: return L"Request cancellation of the current operation.";
     case DeleteBackup: return L"Permanently delete a backup ZIP after confirmation.";
     case SaveTask: return L"Save this backup scheme.";
@@ -378,7 +377,6 @@ struct App {
     size_t activeProfile = 0;
     HWND profileChoice{};
     bool showProfileZips = true;
-    std::vector<fs::path> savedFolders;
     std::vector<fs::path> zips, targets;
     std::map<int, HWND> buttons;
     std::map<Node*, HTREEITEM> items;
@@ -515,7 +513,6 @@ struct App {
         percentLabel = Control(L"STATIC", L"", SS_RIGHT | SS_NOPREFIX);
         SendMessageW(progressBar, PBM_SETRANGE32, 0, 100);
         mode = Control(L"STATIC", L"", SS_NOPREFIX | SS_PATHELLIPSIS);
-        savedFolders = LoadBackupDestinations();
         lastFolder = LoadBackupFolder();
         if (lastFolder.empty()) lastFolder = KnownFolder(FOLDERID_Documents);
         profiles = LoadBackupProfiles(lastFolder);
@@ -1086,33 +1083,8 @@ struct App {
         }, L"Backup – " + profile.name, folder);
     }
 
-    void RememberFolder(const fs::path& path) {
-        auto folders = savedFolders;
-        if (std::any_of(folders.begin(), folders.end(), [&](const auto& item) { return EqualPath(item, path); })) return;
-        folders.push_back(path);
-        SaveBackupDestinations(folders);
-        savedFolders = std::move(folders);
-    }
-
-    fs::path PickSavedFolder(HWND owner, HWND button, const fs::path& current) {
-        auto menu = CreatePopupMenu();
-        if (!menu) Fail(L"Could not open saved destinations.");
-        for (size_t i = 0; i < savedFolders.size(); ++i) {
-            auto name = savedFolders[i].wstring();
-            for (size_t pos = 0; (pos = name.find(L'&', pos)) != name.npos; pos += 2) name.insert(pos, 1, L'&');
-            AppendMenuW(menu, EqualPath(savedFolders[i], current) ? MF_CHECKED : MF_STRING, i + 1, name.c_str());
-        }
-        if (savedFolders.empty()) AppendMenuW(menu, MF_GRAYED, 0, L"No saved destinations");
-        RECT rect{};
-        GetWindowRect(button, &rect);
-        const auto choice = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_NONOTIFY, rect.left, rect.bottom, 0, owner, nullptr);
-        DestroyMenu(menu);
-        if (choice > 0 && static_cast<size_t>(choice) <= savedFolders.size()) return savedFolders[choice - 1];
-        return {};
-    }
-
     std::vector<fs::path> BackupPlaces() const {
-        auto places = savedFolders;
+        std::vector<fs::path> places;
         for (const auto& profile : profiles) {
             const auto& folder = profile.schedule.folder;
             if (!folder.empty() && std::none_of(places.begin(), places.end(), [&](const auto& path) { return EqualPath(path, folder); })) {
@@ -1162,7 +1134,7 @@ struct ScheduleDialog {
     App& app;
     BackupProfile profile;
     bool creating = false, saved = false, removed = false;
-    HWND name{}, removeTask{}, savedFolderButton{};
+    HWND name{}, removeTask{};
     HWND tooltips{};
     HWND dialog{}, folder{}, time{}, copies{}, frequency{};
     HWND logText{}, emptyLog{}, closeLog{};
@@ -1196,8 +1168,7 @@ struct ScheduleDialog {
         SendMessageW(name, EM_SETLIMITTEXT, 100, 0);
         Add(L"STATIC", L"Backup destination", 0, 0, Padding, 78, 360, 20);
         folder = Add(L"EDIT", schedule.folder.c_str(), WS_BORDER | ES_AUTOHSCROLL | WS_TABSTOP, 0,
-            Padding, 102, 370, 27);
-        savedFolderButton = Add(L"BUTTON", L"Saved…", WS_TABSTOP, ScheduleSavedFolders, 406, 101, 74, 29);
+            Padding, 102, Width - 2 * Padding - 108, 27);
         Add(L"BUTTON", L"Browse…", WS_TABSTOP, ScheduleFolder, 492, 101, 96, 29);
         Add(L"STATIC", L"Schedule", 0, 0, Padding, 148, 190, 22);
         Add(L"STATIC", app.use24Hour ? L"Local time (24-hour)" : L"Local time (AM/PM)", 0, 0, 238, 148, 155, 22);
@@ -1269,11 +1240,6 @@ struct ScheduleDialog {
         case Frequency:
             if (notification == CBN_SELCHANGE) SetScheduleControls();
             break;
-        case ScheduleSavedFolders: {
-            auto selected = app.PickSavedFolder(dialog, savedFolderButton, Text(folder));
-            if (!selected.empty()) SetWindowTextW(folder, selected.c_str());
-            break;
-        }
         case EmptyLog:
             if (Confirm(dialog, L"Empty the backup and restore log?",
                 L"This permanently clears the operation history.", true)) {
@@ -1439,20 +1405,15 @@ void App::EditProfile(bool create) {
     }
     dialog.Show();
     if (dialog.removed) {
-        auto folder = profiles.at(activeProfile).schedule.folder;
         profiles.erase(profiles.begin() + activeProfile);
-        if (!folder.empty()) RememberFolder(folder);
         activeProfile = profiles.empty() ? 0 : std::min(activeProfile, profiles.size() - 1);
     } else if (dialog.saved) {
         if (create) {
             profiles.push_back(std::move(dialog.profile));
             activeProfile = profiles.size() - 1;
         } else {
-            auto folder = profiles[activeProfile].schedule.folder;
             profiles[activeProfile] = std::move(dialog.profile);
-            if (!folder.empty()) RememberFolder(folder);
         }
-        RememberFolder(profiles.at(activeProfile).schedule.folder);
     }
     if (dialog.saved || dialog.removed) {
         RefreshProfiles();
