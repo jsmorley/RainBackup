@@ -523,7 +523,7 @@ struct App {
         } else {
             place(detail, 30, lower + 7, width - 195, 25);
             button(Details, width - 149, lower + 2, 119, 30);
-            button(OpenBackupDestination, 30, lower + 43, 27, 29);
+            button(OpenBackupDestination, 30, lower + 42, 27, 29);
             place(backupPathLabel, 64, lower + 47, 130, 25);
             backupField = {Px(196), Px(lower + 43), Px(width - 30), Px(lower + 72)};
             HDC dc = GetDC(backupPath);
