@@ -24,6 +24,7 @@ namespace {
 constexpr UINT Finished = WM_APP + 1, ProgressUpdate = WM_APP + 2;
 constexpr int RainBackupIcon = 101;
 constexpr int HeaderLogoSize = 64;
+constexpr int ProfileRowHeight = 38;
 constexpr wchar_t DestinationArrow[] = L"⬆️";
 enum Id {
     BackupPage = 100, RestorePage, ScanNow, ScanFolder, AddFolder, AddFile, Change, Remove, ScheduleButton,
@@ -340,7 +341,7 @@ struct ProgressMessage {
 struct App {
     HWND window{}, tree{}, title{}, sub{}, detail{}, status{}, summary{}, zipList{}, destinations{}, mode{},
         backupPath{}, backupPathLabel{}, progressBar{}, percentLabel{};
-    HFONT regular{}, heading{}, section{};
+    HFONT regular{}, heading{}, section{}, profileFont{};
     HIMAGELIST checks{}, icons{};
     HINSTANCE instance{};
     HWND tooltips{};
@@ -373,7 +374,7 @@ struct App {
     ~App() {
         if (worker.joinable()) worker.join();
         if (headerIcon) DestroyIcon(headerIcon);
-        for (auto font : {regular, heading, section}) DeleteObject(font);
+        for (auto font : {regular, heading, section, profileFont}) DeleteObject(font);
         ImageList_Destroy(checks);
         ImageList_Destroy(icons);
     }
@@ -392,7 +393,7 @@ struct App {
     }
 
     void Fonts() {
-        for (auto font : {regular, heading, section}) DeleteObject(font);
+        for (auto font : {regular, heading, section, profileFont}) DeleteObject(font);
         auto font = [&](int size, int weight) {
             return CreateFontW(-Px(size), 0, 0, 0, weight, 0, 0, 0, DEFAULT_CHARSET,
                 OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
@@ -400,9 +401,19 @@ struct App {
         regular = font(14, FW_NORMAL);
         heading = font(32, FW_SEMIBOLD);
         section = font(16, FW_SEMIBOLD);
+        profileFont = font(18, FW_NORMAL);
         for (HWND c = GetWindow(window, GW_CHILD); c; c = GetWindow(c, GW_HWNDNEXT)) {
-            auto use = c == title ? heading : c == summary ? section : regular;
+            auto use = c == title ? heading : c == summary ? section : c == profileChoice ? profileFont : regular;
             SendMessageW(c, WM_SETFONT, reinterpret_cast<WPARAM>(use), TRUE);
+        }
+        if (profileChoice) {
+            RECT bounds{};
+            const int fieldHeight = static_cast<int>(SendMessageW(profileChoice, CB_GETITEMHEIGHT, static_cast<WPARAM>(-1), 0));
+            if (GetWindowRect(profileChoice, &bounds) && fieldHeight > 0) {
+                const int borderHeight = bounds.bottom - bounds.top - fieldHeight;
+                ComboBox_SetItemHeight(profileChoice, -1, Px(ProfileRowHeight) - borderHeight - 1);
+            }
+            ComboBox_SetItemHeight(profileChoice, 0, Px(28));
         }
     }
 
@@ -494,7 +505,8 @@ struct App {
         lastFolder = LoadBackupFolder();
         if (lastFolder.empty()) lastFolder = KnownFolder(FOLDERID_Documents);
         profiles = LoadBackupProfiles(lastFolder);
-        profileChoice = Control(WC_COMBOBOXW, L"", WS_TABSTOP | CBS_DROPDOWNLIST | WS_VSCROLL, ProfileChoice);
+        profileChoice = Control(WC_COMBOBOXW, L"",
+            WS_TABSTOP | CBS_DROPDOWNLIST | CBS_OWNERDRAWFIXED | CBS_HASSTRINGS | WS_VSCROLL, ProfileChoice);
         RefreshProfiles();
         backupPath = Control(L"EDIT", L"",
             WS_TABSTOP | ES_AUTOHSCROLL | ES_READONLY, BackupPath);
@@ -548,11 +560,11 @@ struct App {
         place(sub, 110, 64, width - 282, 24);
         button(ShowLog, width - 160, 36, 80, 38);
         button(MoreMenu, width - 72, 36, 42, 38);
-        button(BackupPage, 30, 101, 119, 38);
-        button(RestorePage, 157, 101, 119, 38);
-        place(profileChoice, 294, 108, width - (restorePage ? 324 : 484), 265);
-        button(NewProfile, width - 182, 101, 72, 38);
-        button(ScheduleButton, width - 102, 101, 72, 38);
+        button(BackupPage, 30, 101, 119, ProfileRowHeight);
+        button(RestorePage, 157, 101, 119, ProfileRowHeight);
+        place(profileChoice, 294, 101, width - (restorePage ? 324 : 484), 265);
+        button(NewProfile, width - 182, 101, 72, ProfileRowHeight);
+        button(ScheduleButton, width - 102, 101, 72, ProfileRowHeight);
         int y = 159;
         if (restorePage) {
             button(Open, 30, y, 110);
@@ -1806,6 +1818,30 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
         }
         case WM_DRAWITEM: {
             auto row = reinterpret_cast<DRAWITEMSTRUCT*>(lp);
+            if (row->CtlType == ODT_COMBOBOX && row->CtlID == ProfileChoice) {
+                const bool selected = row->itemState & ODS_SELECTED;
+                const bool disabled = row->itemState & ODS_DISABLED;
+                auto& palette = app->palette;
+                auto fill = CreateSolidBrush(selected ? palette.accent : palette.panel);
+                FillRect(row->hDC, &row->rcItem, fill);
+                DeleteObject(fill);
+                if (row->itemID < app->profiles.size() || app->profiles.empty()) {
+                    const auto* name = app->profiles.empty() ? L"No named backups" : app->profiles[row->itemID].name.c_str();
+                    auto bounds = row->rcItem;
+                    bounds.left += app->Px(5);
+                    bounds.right -= app->Px(3);
+                    const auto previous = SelectObject(row->hDC, app->profileFont);
+                    SetBkMode(row->hDC, TRANSPARENT);
+                    SetTextColor(row->hDC, selected ? palette.onAccent : disabled ? palette.quiet : palette.text);
+                    DrawTextW(row->hDC, name, -1, &bounds,
+                        DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS | DT_NOPREFIX);
+                    SelectObject(row->hDC, previous);
+                }
+                if ((row->itemState & ODS_FOCUS) && !(row->itemState & ODS_NOFOCUSRECT)) {
+                    DrawFocusRect(row->hDC, &row->rcItem);
+                }
+                return TRUE;
+            }
             if (row->CtlType != ODT_BUTTON) break;
             auto id = row->CtlID;
             if (id == OpenBackupDestination) {
