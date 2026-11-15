@@ -38,7 +38,7 @@ $run = Start-Process -FilePath $exe -ArgumentList '"My scheme" Backup' -Wait -Pa
 $run.ExitCode
 ```
 
-Use `Backup` or `Restore` after the name of a saved scheme. Quote names with spaces. Both commands run without a window, prompts, or console output. The exit code is `0` for success, `1` for an operation failure, or `2` for invalid arguments. Operation details appear in **Log**.
+Use `Backup` or `Restore` after the name of a saved scheme. Quote names with spaces. Both commands run without a window, prompts, or console output. The exit code is `0` for success, `1` for an operation failure, or `2` for invalid arguments. Operation details appear under **More options → Open log**.
 
 - **Backup** uses the scheme's saved sources, exclusions, destination, and retention settings.
 - **Restore** restores all entries from the scheme's newest ZIP in its current destination to their original locations, overwriting existing files without prompting. RainBackup closes and restarts Rainmeter as needed.
@@ -80,7 +80,7 @@ Switch to **Manual only** to stop automatic runs. In **Edit**, choose **Remove s
 
 ## View or empty the operation log
 
-Open **More options → Log** to see manual backups, scheduled backups, and restores. Each entry shows when the operation ran and whether it succeeded, failed, or was canceled. Click **Empty log** and confirm to clear the history. Backup ZIPs and settings stay in place.
+Open **More options → Open log** to see manual backups, scheduled backups, and restores. Each entry shows when the operation ran and whether it succeeded, failed, or was canceled. Click **Empty log** and confirm to clear the history. Backup ZIPs and settings stay in place.
 
 When RainBackup starts, the bottom-left status area shows the date and result of the last scheduled backup in the log.
 

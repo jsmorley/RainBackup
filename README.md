@@ -23,7 +23,7 @@ Interactive backups and restores show the current path and percent complete. **C
 
 Use **Edit** to choose manual only, daily, or Monday. Automatic backups keep a configurable number of copies per scheme and run under the signed-in account. RainBackup imports previous schedules as backup schemes.
 
-Open **More options → Log** for dated backup and restore results. **Empty log** clears the history after confirmation.
+Open **More options → Open log** for dated backup and restore results. **Empty log** clears the history after confirmation.
 
 ## Command line
 
