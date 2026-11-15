@@ -80,7 +80,7 @@ Switch to **Manual only** to stop automatic runs. In **Edit**, choose **Remove s
 
 ## View or empty the operation log
 
-Open **More options → Open log** to see manual backups, scheduled backups, and restores. Each entry shows when the operation ran and whether it succeeded, failed, or was canceled. Click **Empty log** and confirm to clear the history. Backup ZIPs and settings stay in place.
+Open **More options → Open log** to see manual backups, scheduled backups, and restores. Each entry shows when the operation ran and whether it succeeded, failed, or was canceled. Backup entries also show elapsed time in hours, minutes, and seconds. Click **Empty log** and confirm to clear the history. Backup ZIPs and settings stay in place.
 
 When RainBackup starts, the bottom-left status area shows the date and result of the last scheduled backup in the log.
 

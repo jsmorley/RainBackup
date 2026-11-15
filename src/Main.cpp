@@ -831,6 +831,7 @@ struct App {
         Refresh();
         worker = std::thread([this, work = std::move(work), stop = stopTransfer.get_token(),
             operation = std::move(operation), location = std::move(location)]() mutable {
+            const auto started = std::chrono::steady_clock::now();
             auto publish = [this, last = ULONGLONG{}](const std::wstring& text, int percent) mutable {
                 auto now = GetTickCount64();
                 if (now - last < 120) return;
@@ -855,12 +856,16 @@ struct App {
             }
             catch (const std::exception& error) { result->error = Utf16(error.what(), CP_ACP); try { result->error = Utf16(error.what()); } catch (...) {} }
             if (!operation.empty()) {
+                std::optional<std::chrono::seconds> elapsed;
+                if (operation.starts_with(L"Backup – ")) {
+                    elapsed = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - started);
+                }
                 auto detail = location.wstring();
                 if (!result->error.empty()) detail += L"\n" + result->error;
                 try {
                     LogOperation(operation, result->cancelled ? L"Canceled" :
                         result->error.empty() ? L"Success" : L"Failure", detail,
-                        result->error.empty() || operation == L"Restore" ? location : fs::path{});
+                        result->error.empty() || operation == L"Restore" ? location : fs::path{}, elapsed);
                 } catch (const std::exception&) {
                     result->logFailed = true;
                 }

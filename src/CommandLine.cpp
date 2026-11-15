@@ -38,6 +38,11 @@ int RunNamedCommand() {
 
     const std::wstring name = arguments[1];
     const std::wstring operation = backup ? L"Command-line backup" : L"Command-line restore";
+    const auto started = std::chrono::steady_clock::now();
+    auto elapsed = [&]() -> std::optional<std::chrono::seconds> {
+        if (!backup) return std::nullopt;
+        return std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - started);
+    };
     fs::path archive;
     try {
         auto defaultFolder = LoadBackupFolder();
@@ -65,13 +70,13 @@ int RunNamedCommand() {
             for (const auto& source : opened.tree->sources) destinations.push_back(source.path);
             RestoreWithRainmeterRestart(opened, PlanRestore(opened, destinations, false));
         }
-        LogOperation(operation, L"Success", name + L"\n" + archive.wstring(), archive);
+        LogOperation(operation, L"Success", name + L"\n" + archive.wstring(), archive, elapsed());
         return 0;
     } catch (const std::exception& error) {
         try {
             auto detail = name;
             if (!archive.empty()) detail += L"\n" + archive.wstring();
-            LogOperation(operation, L"Failure", detail + L"\n" + Utf16(error.what()), archive);
+            LogOperation(operation, L"Failure", detail + L"\n" + Utf16(error.what()), archive, elapsed());
         }
         catch (const std::exception&) {}
         return 1;

@@ -1,5 +1,6 @@
 #pragma once
 #include "Archive.h"
+#include <chrono>
 namespace rb {
 struct Schedule {
     fs::path folder;
@@ -27,7 +28,7 @@ fs::path SaveManagedBackup(const Tree& tree, const Schedule& schedule, const Tra
     bool retain = true, std::wstring_view name = L"Backup");
 int RunScheduled(bool catchUp, std::wstring_view id = {});
 void LogOperation(std::wstring_view operation, std::wstring_view result, std::wstring_view detail = {},
-    const fs::path& archive = {});
+    const fs::path& archive = {}, std::optional<std::chrono::seconds> elapsed = std::nullopt);
 std::wstring ReadOperationLog();
 std::wstring LastScheduledBackup();
 void EmptyOperationLog();

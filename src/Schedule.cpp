@@ -148,7 +148,7 @@ private:
 }
 
 void LogOperation(std::wstring_view operation, std::wstring_view result, std::wstring_view detail,
-    const fs::path& archive) {
+    const fs::path& archive, std::optional<std::chrono::seconds> elapsed) {
     std::error_code sizeError;
     const auto size = archive.empty() ? 0 : fs::file_size(archive, sizeError);
     LogLock lock;
@@ -183,6 +183,12 @@ void LogOperation(std::wstring_view operation, std::wstring_view result, std::ws
             formatted << size << " bytes";
         }
         log << "    ZIP size: " << formatted.str() << "\r\n";
+    }
+    if (elapsed) {
+        const std::chrono::hh_mm_ss time{*elapsed};
+        log << "    Elapsed time: " << time.hours().count() << ':'
+            << std::setfill('0') << std::setw(2) << time.minutes().count() << ':'
+            << std::setw(2) << time.seconds().count() << "\r\n";
     }
     log << "\r\n";
     log.close();
@@ -522,6 +528,10 @@ fs::path SaveManagedBackup(const Tree& tree, const Schedule& schedule, const Tra
 }
 
 int RunScheduled(bool catchUp, std::wstring_view id) {
+    const auto started = std::chrono::steady_clock::now();
+    auto elapsed = [&] {
+        return std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - started);
+    };
     fs::path zip;
     fs::path destination;
     std::wstring backupName;
@@ -553,10 +563,14 @@ int RunScheduled(bool catchUp, std::wstring_view id) {
         last.close();
         if (!last) Fail(L"Backup saved, but the scheduled run record could not be written.");
         LogOperation(L"Scheduled backup", L"Success", backupName + L"Saved " + zip.wstring() + (tree->warnings.empty() ? L"" :
-            L"\nSkipped " + std::to_wstring(tree->warnings.size()) + L" linked item(s)."), zip);
+            L"\nSkipped " + std::to_wstring(tree->warnings.size()) + L" linked item(s)."), zip,
+            elapsed());
         return 0;
     } catch (const std::exception& error) {
-        try { LogOperation(L"Scheduled backup", L"Failure", backupName + destination.wstring() + L"\n" + Utf16(error.what()), zip); }
+        try {
+            LogOperation(L"Scheduled backup", L"Failure", backupName + destination.wstring() + L"\n" + Utf16(error.what()), zip,
+                elapsed());
+        }
         catch (const std::exception&) {}
         return 1;
     }
