@@ -39,8 +39,7 @@ int RunNamedCommand() {
     const std::wstring name = arguments[1];
     const std::wstring operation = backup ? L"Command-line backup" : L"Command-line restore";
     const auto started = std::chrono::steady_clock::now();
-    auto elapsed = [&]() -> std::optional<std::chrono::seconds> {
-        if (!backup) return std::nullopt;
+    auto elapsed = [&] {
         return std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - started);
     };
     fs::path archive;

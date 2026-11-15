@@ -1065,10 +1065,8 @@ struct App {
             }
             catch (const std::exception& error) { result->error = Utf16(error.what(), CP_ACP); try { result->error = Utf16(error.what()); } catch (...) {} }
             if (!operation.empty()) {
-                std::optional<std::chrono::seconds> elapsed;
-                if (operation.starts_with(L"Backup – ")) {
-                    elapsed = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - started);
-                }
+                const auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
+                    std::chrono::steady_clock::now() - started);
                 auto detail = location.wstring();
                 if (!result->error.empty()) detail += L"\n" + result->error;
                 try {
