@@ -559,7 +559,8 @@ struct App {
         GetClientRect(window, &r);
         const int width = MulDiv(r.right, 96, dpi), height = MulDiv(r.bottom, 96, dpi);
         auto place = [&](HWND control, int x, int y, int w, int h) {
-            MoveWindow(control, Px(x), Px(y), Px(w), Px(h), TRUE);
+            SetWindowPos(control, nullptr, Px(x), Px(y), Px(w), Px(h),
+                SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOREDRAW);
         };
         auto button = [&](int id, int x, int y, int w, int h = 34) { place(buttons.at(id), x, y, w, h); };
         place(title, 108, 20, width - 280, 42);
@@ -605,12 +606,13 @@ struct App {
             place(detail, 30, lower + 7, width - (backup && !backup->warnings.empty() ? 195 : 60), 25);
             button(Details, width - 149, lower + 2, 119, 30);
         }
-        InvalidateRect(window, nullptr, TRUE);
         place(status, 30, height - (transferring ? 57 : 46), width - 242, 21);
         place(progressBar, 30, height - 31, width - 291, 13);
         place(percentLabel, width - 253, height - 35, 43, 22);
         button(Run, width - 195, height - 57, 165, 38);
         button(CancelTransfer, width - 195, height - 57, 165, 38);
+        // Repaint the parent and children after every control is in its final position.
+        RedrawWindow(window, nullptr, nullptr, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN);
     }
 
     Tree* Active() const { return restorePage ? opened.tree.get() : backup.get(); }
@@ -1662,7 +1664,9 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
     try {
         switch (message) {
         case WM_CREATE: app->Init(); return 0;
-        case WM_SIZE: if (app->tree) app->Layout(); return 0;
+        case WM_SIZE:
+            if (app->tree && wp != SIZE_MINIMIZED) app->Layout();
+            return 0;
         case WM_MOVE: {
             RECT bounds{};
             if (!IsIconic(window) && !IsZoomed(window) && GetWindowRect(window, &bounds)) {
@@ -1927,6 +1931,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR arguments, int show) {
     app.instance = instance;
     WNDCLASSEXW wc{};
     wc.cbSize = sizeof(wc);
+    wc.style = CS_HREDRAW | CS_VREDRAW;
     wc.hInstance = instance;
     wc.lpfnWndProc = WindowProc;
     wc.lpszClassName = L"RainBackup";
