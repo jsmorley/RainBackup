@@ -15,6 +15,7 @@
 #include <wrl/implements.h>
 #include <algorithm>
 #include <map>
+#include <span>
 #include <thread>
 
 using namespace rb;
@@ -153,59 +154,10 @@ std::wstring Text(HWND control) {
 }
 
 bool Confirm(HWND window, const std::wstring& heading, const std::wstring& details = {},
-    bool destructive = false, const wchar_t* checkbox = nullptr, BOOL* checked = nullptr) {
-    TASKDIALOGCONFIG dialog{};
-    dialog.cbSize = sizeof(dialog);
-    dialog.hwndParent = window;
-    dialog.dwFlags = TDF_ALLOW_DIALOG_CANCELLATION | TDF_POSITION_RELATIVE_TO_WINDOW;
-    dialog.dwCommonButtons = TDCBF_YES_BUTTON | TDCBF_NO_BUTTON;
-    dialog.pszWindowTitle = L"RainBackup";
-    dialog.pszMainIcon = destructive ? TD_WARNING_ICON : TD_INFORMATION_ICON;
-    dialog.pszMainInstruction = heading.c_str();
-    dialog.pszContent = details.empty() ? nullptr : details.c_str();
-    dialog.pszVerificationText = checkbox;
-    dialog.nDefaultButton = IDNO;
-    dialog.cxWidth = 360;
-    int choice = IDNO;
-    BOOL verification = FALSE;
-    if (checked) *checked = FALSE;
-    if (SUCCEEDED(TaskDialogIndirect(&dialog, &choice, nullptr, checked ? &verification : nullptr))) {
-        if (checked) *checked = choice == IDYES && verification;
-        return choice == IDYES;
-    }
-    const auto fallback = details.empty() ? heading : heading + L"\n\n" + details;
-    return MessageBoxW(window, fallback.c_str(), L"RainBackup",
-        MB_YESNO | MB_DEFBUTTON2 | (destructive ? MB_ICONWARNING : MB_ICONQUESTION)) == IDYES;
-}
-
-void Message(HWND window, const std::wstring& message, UINT icon = MB_ICONINFORMATION) {
-    MessageBoxW(window, message.c_str(), L"RainBackup", MB_OK | icon);
-}
-
-ConflictDecision AskRestoreConflict(HWND window, const fs::path& path) {
-    constexpr int Skip = 100, Replace = 101;
-    constexpr TASKDIALOG_BUTTON buttons[] = {{Skip, L"Skip"}, {Replace, L"Replace"}};
-    TASKDIALOGCONFIG dialog{};
-    dialog.cbSize = sizeof(dialog);
-    dialog.hwndParent = window;
-    dialog.dwFlags = TDF_ALLOW_DIALOG_CANCELLATION | TDF_POSITION_RELATIVE_TO_WINDOW;
-    dialog.dwCommonButtons = TDCBF_CANCEL_BUTTON;
-    dialog.pszWindowTitle = L"RainBackup";
-    dialog.pszMainIcon = TD_WARNING_ICON;
-    dialog.pszMainInstruction = L"A file with this name already exists";
-    dialog.pszContent = path.c_str();
-    dialog.pszVerificationText = L"Do this for all future conflicts";
-    dialog.cButtons = static_cast<UINT>(std::size(buttons));
-    dialog.pButtons = buttons;
-    dialog.nDefaultButton = Skip;
-    dialog.cxWidth = 420;
-    int button = IDCANCEL;
-    BOOL applyToAll = FALSE;
-    if (FAILED(TaskDialogIndirect(&dialog, &button, nullptr, &applyToAll))) return {};
-    if (button == Skip) return {ConflictAction::Skip, applyToAll != FALSE};
-    if (button == Replace) return {ConflictAction::Replace, applyToAll != FALSE};
-    return {};
-}
+    bool destructive = false, const wchar_t* checkbox = nullptr, BOOL* checked = nullptr,
+    const wchar_t* detailLabel = nullptr);
+void Message(HWND window, const std::wstring& message, UINT icon = MB_ICONINFORMATION);
+ConflictDecision AskRestoreConflict(HWND window, const fs::path& path);
 
 enum class Picker { Folder, Open };
 
@@ -364,6 +316,236 @@ void Box(HDC dc, RECT r, int radius, COLORREF fill, COLORREF edge) {
     DeleteObject(brush);
 }
 
+void DrawButtonSurface(const DRAWITEMSTRUCT& item, const Palette& palette, int radius, bool primary) {
+    const bool disabled = item.itemState & ODS_DISABLED;
+    const bool pressed = item.itemState & ODS_SELECTED;
+    primary = primary && !disabled;
+    const auto fill = disabled ? palette.bg : pressed ? palette.hover : primary ? palette.accent : palette.panel;
+    FillRect(item.hDC, &item.rcItem, palette.background);
+    Box(item.hDC, item.rcItem, radius, fill, primary ? palette.accent : palette.border);
+    SetBkMode(item.hDC, TRANSPARENT);
+    SetTextColor(item.hDC, disabled ? palette.quiet : primary && !pressed ? palette.onAccent : palette.text);
+}
+
+void DrawButtonText(const DRAWITEMSTRUCT& item, HFONT font) {
+    auto bounds = item.rcItem;
+    const auto text = Text(item.hwndItem);
+    const auto previous = SelectObject(item.hDC, font);
+    DrawTextW(item.hDC, text.c_str(), -1, &bounds,
+        DT_SINGLELINE | DT_CENTER | DT_VCENTER | DT_HIDEPREFIX);
+    SelectObject(item.hDC, previous);
+}
+
+void DrawButtonFocus(const DRAWITEMSTRUCT& item) {
+    if ((item.itemState & ODS_FOCUS) && !(item.itemState & ODS_NOFOCUSRECT)) {
+        auto bounds = item.rcItem;
+        InflateRect(&bounds, -3, -3);
+        DrawFocusRect(item.hDC, &bounds);
+    }
+}
+
+struct Prompt {
+    static constexpr int Verification = 200;
+    static constexpr int Width = 620;
+    static constexpr int Padding = 24;
+    static constexpr DWORD Style = WS_POPUP | WS_CAPTION | WS_SYSMENU | DS_MODALFRAME;
+
+    const wchar_t* heading;
+    const wchar_t* details;
+    std::span<const std::pair<int, const wchar_t*>> buttons;
+    int defaultButton;
+    int primaryButton;
+    const wchar_t* checkbox = nullptr;
+    const wchar_t* detailLabel = nullptr;
+    bool checked = false;
+    Palette palette{};
+    UINT dpi = 96;
+    HFONT body{}, title{}, emphasis{};
+
+    ~Prompt() {
+        DeleteObject(body);
+        DeleteObject(title);
+        DeleteObject(emphasis);
+    }
+
+    int Px(int value) const { return MulDiv(value, dpi, 96); }
+
+    void Init(HWND window) {
+        dpi = GetDpiForWindow(window);
+        palette.Load(window, LoadDarkMode());
+        body = CreateFontW(-Px(16), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
+            OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
+        title = CreateFontW(-Px(22), 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
+            OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
+        emphasis = CreateFontW(-Px(16), 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
+            OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
+
+        RECT work{};
+        const auto owner = GetWindow(window, GW_OWNER);
+        MONITORINFO monitor{sizeof(MONITORINFO)};
+        if (GetMonitorInfoW(MonitorFromWindow(owner, MONITOR_DEFAULTTOPRIMARY), &monitor)) work = monitor.rcWork;
+        else SystemParametersInfoW(SPI_GETWORKAREA, 0, &work, 0);
+        const int width = std::clamp<int>(work.right - work.left - Px(32), Px(360), Px(Width));
+        const int pad = Px(Padding);
+        const int contentWidth = width - 2 * pad;
+        auto add = [&](const wchar_t* type, const wchar_t* text, DWORD style, int id, int x, int y, int w, int h, HFONT font) {
+            auto control = CreateWindowExW(0, type, text, WS_CHILD | WS_VISIBLE | style, x, y, w, h, window,
+                reinterpret_cast<HMENU>(static_cast<INT_PTR>(id)),
+                reinterpret_cast<HINSTANCE>(GetWindowLongPtrW(window, GWLP_HINSTANCE)), nullptr);
+            SendMessageW(control, WM_SETFONT, reinterpret_cast<WPARAM>(font), FALSE);
+        };
+        auto dc = GetDC(window);
+        auto measure = [&](const wchar_t* text, HFONT font) {
+            RECT bounds{0, 0, contentWidth, 0};
+            auto previous = SelectObject(dc, font);
+            DrawTextW(dc, text, -1, &bounds, DT_CALCRECT | DT_WORDBREAK | DT_EDITCONTROL | DT_NOPREFIX);
+            SelectObject(dc, previous);
+            return bounds;
+        };
+        const int headingHeight = measure(heading, title).bottom + Px(3);
+        const auto detailBounds = measure(details, body);
+        const int detailHeight = *details ? detailBounds.bottom + Px(6) : 0;
+        const int labelHeight = detailLabel ? measure(detailLabel, emphasis).bottom + Px(3) : 0;
+        ReleaseDC(window, dc);
+
+        int y = pad;
+        add(L"STATIC", heading, SS_NOPREFIX, 0, pad, y, contentWidth, headingHeight, title);
+        y += headingHeight;
+        if (detailHeight) {
+            y += Px(14);
+            if (detailLabel) {
+                add(L"STATIC", detailLabel, SS_NOPREFIX | SS_EDITCONTROL, 0, pad, y, contentWidth, labelHeight, emphasis);
+                y += labelHeight + Px(4);
+            }
+            // Keep long paths and diagnostic text readable without letting them push actions off screen.
+            const int maxHeight = std::max(Px(72), std::min<int>(Px(360), work.bottom - work.top - y - Px(152)));
+            const int shownHeight = std::min(detailHeight, maxHeight);
+            if (detailHeight > maxHeight || detailBounds.right > contentWidth) {
+                std::wstring lines;
+                for (const wchar_t* ch = details; *ch; ++ch) {
+                    if (*ch == L'\n' && (ch == details || ch[-1] != L'\r')) lines += L'\r';
+                    lines += *ch;
+                }
+                const DWORD style = WS_BORDER | WS_VSCROLL | WS_TABSTOP | ES_MULTILINE | ES_READONLY;
+                add(L"EDIT", lines.c_str(), style, 0, pad, y, contentWidth,
+                    std::max(shownHeight, Px(72)), body);
+                y += std::max(shownHeight, Px(72)) - shownHeight;
+            } else {
+                add(L"STATIC", details, SS_NOPREFIX | SS_EDITCONTROL, 0, pad, y, contentWidth, shownHeight, body);
+            }
+            y += shownHeight;
+        }
+        if (checkbox) {
+            y += Px(14);
+            add(L"BUTTON", checkbox, BS_AUTOCHECKBOX | WS_TABSTOP, Verification, pad, y, contentWidth, Px(28), body);
+            y += Px(28);
+        }
+        y += Px(20);
+        const int buttonWidth = Px(94), gap = Px(10);
+        int x = width - pad - static_cast<int>(buttons.size()) * (buttonWidth + gap) + gap;
+        for (const auto& [id, text] : buttons) {
+            add(L"BUTTON", text, BS_OWNERDRAW | WS_TABSTOP, id, x, y, buttonWidth, Px(38), body);
+            x += buttonWidth + gap;
+        }
+        RECT bounds{0, 0, width, y + Px(38) + pad};
+        AdjustWindowRectExForDpi(&bounds, Style, FALSE, WS_EX_DLGMODALFRAME, dpi);
+        const int w = bounds.right - bounds.left, h = bounds.bottom - bounds.top;
+        RECT parent = work;
+        if (owner) GetWindowRect(owner, &parent);
+        SetWindowPos(window, nullptr,
+            std::clamp<int>((parent.left + parent.right - w) / 2, work.left, std::max(work.left, work.right - w)),
+            std::clamp<int>((parent.top + parent.bottom - h) / 2, work.top, std::max(work.top, work.bottom - h)),
+            w, h, SWP_NOZORDER | SWP_NOACTIVATE);
+        SendMessageW(window, DM_SETDEFID, defaultButton, 0);
+        SetFocus(GetDlgItem(window, defaultButton));
+    }
+
+    static INT_PTR CALLBACK Proc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
+        auto self = reinterpret_cast<Prompt*>(GetWindowLongPtrW(window, DWLP_USER));
+        if (message == WM_INITDIALOG) {
+            self = reinterpret_cast<Prompt*>(lp);
+            SetWindowLongPtrW(window, DWLP_USER, lp);
+            self->Init(window);
+            return FALSE;
+        }
+        if (!self) return FALSE;
+        switch (message) {
+        case WM_COMMAND: {
+            const int id = LOWORD(wp);
+            if (id == Verification) return TRUE;
+            if (id == IDCANCEL || std::any_of(self->buttons.begin(), self->buttons.end(),
+                [id](const auto& button) { return button.first == id; })) {
+                self->checked = IsDlgButtonChecked(window, Verification) == BST_CHECKED;
+                EndDialog(window, id);
+                return TRUE;
+            }
+            break;
+        }
+        case WM_CLOSE: EndDialog(window, IDCANCEL); return TRUE;
+        case WM_DRAWITEM: {
+            const auto& item = *reinterpret_cast<DRAWITEMSTRUCT*>(lp);
+            DrawButtonSurface(item, self->palette, self->Px(12), static_cast<int>(item.CtlID) == self->primaryButton);
+            DrawButtonText(item, self->body);
+            DrawButtonFocus(item);
+            return TRUE;
+        }
+        case WM_CTLCOLORBTN:
+        case WM_CTLCOLORSTATIC: {
+            auto dc = reinterpret_cast<HDC>(wp);
+            SetTextColor(dc, self->palette.text);
+            SetBkColor(dc, self->palette.bg);
+            SetBkMode(dc, TRANSPARENT);
+            return reinterpret_cast<INT_PTR>(self->palette.background);
+        }
+        case WM_ERASEBKGND: {
+            RECT bounds{};
+            GetClientRect(window, &bounds);
+            FillRect(reinterpret_cast<HDC>(wp), &bounds, self->palette.background);
+            return TRUE;
+        }
+        }
+        return FALSE;
+    }
+
+    INT_PTR Show(HWND owner) {
+        struct alignas(DWORD) {
+            DLGTEMPLATE dialog;
+            WORD menu, windowClass;
+            wchar_t caption[11];
+        } layout{{Style, WS_EX_DLGMODALFRAME, 0, 0, 0, 300, 120}, 0, 0, L"RainBackup"};
+        return DialogBoxIndirectParamW(GetModuleHandleW(nullptr), &layout.dialog, owner, Proc,
+            reinterpret_cast<LPARAM>(this));
+    }
+};
+
+bool Confirm(HWND window, const std::wstring& heading, const std::wstring& details,
+    bool destructive, const wchar_t* checkbox, BOOL* checked, const wchar_t* detailLabel) {
+    constexpr std::pair<int, const wchar_t*> buttons[] = {{IDNO, L"No"}, {IDYES, L"Yes"}};
+    Prompt prompt{heading.c_str(), details.c_str(), buttons, IDNO, destructive ? IDNO : IDYES, checkbox, detailLabel};
+    const auto choice = prompt.Show(window);
+    if (checked) *checked = choice == IDYES && prompt.checked;
+    return choice == IDYES;
+}
+
+void Message(HWND window, const std::wstring& message, UINT icon) {
+    constexpr std::pair<int, const wchar_t*> buttons[] = {{IDOK, L"OK"}};
+    const auto heading = icon == MB_ICONERROR ? L"Error" : icon == MB_ICONWARNING ? L"Warning" : L"RainBackup";
+    Prompt prompt{heading, message.c_str(), buttons, IDOK, IDOK};
+    if (prompt.Show(window) == -1) MessageBoxW(window, message.c_str(), L"RainBackup", MB_OK | icon);
+}
+
+ConflictDecision AskRestoreConflict(HWND window, const fs::path& path) {
+    constexpr int Skip = 100, Replace = 101;
+    constexpr std::pair<int, const wchar_t*> buttons[] = {{Skip, L"Skip"}, {Replace, L"Replace"}, {IDCANCEL, L"Cancel"}};
+    const auto filename = path.filename();
+    Prompt prompt{L"A file with this name already exists", path.c_str(), buttons, Skip, Skip,
+        L"Do this for all future conflicts", filename.c_str()};
+    const auto choice = prompt.Show(window);
+    if (choice == Skip) return {ConflictAction::Skip, prompt.checked};
+    if (choice == Replace) return {ConflictAction::Replace, prompt.checked};
+    return {};
+}
+
 struct JobResult {
     std::function<void()> done;
     std::wstring error;
@@ -379,7 +561,7 @@ struct ProgressMessage {
 struct App {
     HWND window{}, tree{}, title{}, sub{}, detail{}, status{}, summary{}, zipList{}, destinations{}, mode{},
         progressBar{}, percentLabel{};
-    HFONT regular{}, heading{}, section{}, profileFont{};
+    HFONT regular{}, heading{}, section{}, profileFont{}, dialogFont{};
     HIMAGELIST checks{}, icons{};
     HINSTANCE instance{};
     HWND tooltips{};
@@ -411,7 +593,7 @@ struct App {
     ~App() {
         if (worker.joinable()) worker.join();
         if (headerIcon) DestroyIcon(headerIcon);
-        for (auto font : {regular, heading, section, profileFont}) DeleteObject(font);
+        for (auto font : {regular, heading, section, profileFont, dialogFont}) DeleteObject(font);
         ImageList_Destroy(checks);
         ImageList_Destroy(icons);
     }
@@ -430,12 +612,13 @@ struct App {
     }
 
     void Fonts() {
-        for (auto font : {regular, heading, section, profileFont}) DeleteObject(font);
+        for (auto font : {regular, heading, section, profileFont, dialogFont}) DeleteObject(font);
         auto font = [&](int size, int weight) {
             return CreateFontW(-Px(size), 0, 0, 0, weight, 0, 0, 0, DEFAULT_CHARSET,
                 OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
         };
         regular = font(14, FW_NORMAL);
+        dialogFont = font(16, FW_NORMAL);
         heading = font(32, FW_SEMIBOLD);
         section = font(16, FW_SEMIBOLD);
         profileFont = font(18, FW_NORMAL);
@@ -1091,11 +1274,12 @@ struct App {
         CheckPath(folder);
         if (!fs::is_directory(folder)) Fail(L"Choose an existing backup folder.");
         if (!Confirm(window, L"Back up " + std::to_wstring(backup->root.checked) + L" selected items?",
-            profile.name + L"\n" + folder.wstring() +
+            folder.wstring() +
             (profile.automatic ? L"\n\nThis scheme keeps " + std::to_wstring(profile.schedule.copies) +
                 L" copies. Older excess copies will be deleted after the ZIP is saved." : L"") +
             (!backup->warnings.empty() ? L"\n\nSome source items were unavailable. See Scan issues for paths." : L"") +
-            L"\n\nSelected online-only files may download from OneDrive.", profile.automatic)) return;
+            L"\n\nSelected online-only files may download from OneDrive.", profile.automatic,
+            nullptr, nullptr, profile.name.c_str())) return;
         Start(L"Creating backup", [this, profile](const Progress& progress, const Transfer& transfer, fs::path& location) {
             auto model = Build(profile.sources, progress, transfer.stop);
             ApplyIgnored(*model, profile.excluded);
@@ -1132,9 +1316,10 @@ struct App {
         const auto question = L"Restore " + std::to_wstring(plan.files) + L" file(s)?";
         const auto conflicts = plan.overwrites ? L"\n\n" + std::to_wstring(plan.overwrites) +
             L" destination file(s) already exist. You can choose how to handle conflicts during restore." : L"";
-        if (!Confirm(window, question, L"Backup ZIP\n" + currentZip.filename().wstring() +
-            L"\n\nSelected folders will be created as needed. Rainmeter will close and restart if it is running."
-            L"\n\nRestore destinations" + mapping + conflicts)) return;
+        const auto archiveName = currentZip.filename();
+        if (!Confirm(window, question,
+            L"Selected folders will be created as needed. Rainmeter will close and restart if it is running."
+            L"\n\nRestore destinations" + mapping + conflicts, false, nullptr, nullptr, archiveName.c_str())) return;
         Start(L"Preparing restore", [this, plan = std::move(plan)](const Progress& progress, const Transfer& transfer) {
             const auto result = RestoreWithRainmeterRestart(opened, plan, progress, transfer, [this](const fs::path& path) {
                 ConflictDecision decision;
@@ -1156,9 +1341,9 @@ struct App {
 
 struct ScheduleDialog {
     static constexpr int Width = 612;
-    static constexpr int Height = 330;
+    static constexpr int Height = 352;
     static constexpr int Padding = 24;
-    static constexpr int Footer = Height - Padding - 32;
+    static constexpr int Footer = Height - Padding - 38;
     static constexpr int SaveWidth = 132;
     static constexpr int SaveLeft = Width - Padding - SaveWidth;
 
@@ -1173,10 +1358,12 @@ struct ScheduleDialog {
     std::wstring logContents;
 
     HWND Add(const wchar_t* type, const wchar_t* label, DWORD style, int id, int x, int y, int w, int h) {
+        const bool button = wcscmp(type, L"BUTTON") == 0;
+        if (button) style = (style & ~BS_TYPEMASK) | BS_OWNERDRAW;
         auto control = CreateWindowExW(0, type, label, WS_CHILD | WS_VISIBLE | style, app.Px(x), app.Px(y),
             app.Px(w), app.Px(h), dialog, reinterpret_cast<HMENU>(static_cast<INT_PTR>(id)), app.instance, nullptr);
-        SendMessageW(control, WM_SETFONT, reinterpret_cast<WPARAM>(app.regular), TRUE);
-        if (wcscmp(type, L"BUTTON") == 0) SetButtonTip(tooltips, dialog, control, ButtonTip(id, false));
+        SendMessageW(control, WM_SETFONT, reinterpret_cast<WPARAM>(app.dialogFont), TRUE);
+        if (button) SetButtonTip(tooltips, dialog, control, ButtonTip(id, false));
         return control;
     }
 
@@ -1186,21 +1373,23 @@ struct ScheduleDialog {
             logText = Add(L"EDIT", L"", WS_BORDER | WS_VSCROLL | WS_HSCROLL | WS_TABSTOP |
                 ES_MULTILINE | ES_AUTOHSCROLL | ES_AUTOVSCROLL | ES_READONLY, 0,
                 Padding, Padding, Width - 2 * Padding, Footer - Padding - 16);
-            emptyLog = Add(L"BUTTON", L"Empty log", WS_TABSTOP, EmptyLog, Padding, Footer, 110, 32);
-            closeLog = Add(L"BUTTON", L"Close", BS_DEFPUSHBUTTON | WS_TABSTOP, CloseDialog,
-                Width - Padding - 84, Footer, 84, 32);
+            emptyLog = Add(L"BUTTON", L"Empty log", WS_TABSTOP, EmptyLog, Padding, Footer, 110, 38);
+            closeLog = Add(L"BUTTON", L"Close", WS_TABSTOP, CloseDialog,
+                Width - Padding - 84, Footer, 84, 38);
             RefreshLog();
             return;
         }
         const auto& schedule = profile.schedule;
-        Add(L"STATIC", L"Scheme name", 0, 0, Padding, 18, 360, 20);
+        auto schemeLabel = Add(L"STATIC", L"Scheme name", 0, 0, Padding, 18, 360, 22);
+        SendMessageW(schemeLabel, WM_SETFONT, reinterpret_cast<WPARAM>(app.section), FALSE);
         name = Add(L"EDIT", profile.name.c_str(), WS_BORDER | ES_AUTOHSCROLL | WS_TABSTOP, 0,
             Padding, 42, Width - 2 * Padding, 27);
         SendMessageW(name, EM_SETLIMITTEXT, 100, 0);
-        Add(L"STATIC", L"Backup destination", 0, 0, Padding, 78, 360, 20);
+        auto destinationLabel = Add(L"STATIC", L"Backup destination", 0, 0, Padding, 78, 360, 22);
+        SendMessageW(destinationLabel, WM_SETFONT, reinterpret_cast<WPARAM>(app.section), FALSE);
         folder = Add(L"EDIT", schedule.folder.c_str(), WS_BORDER | ES_AUTOHSCROLL | WS_TABSTOP, 0,
             Padding, 102, Width - 2 * Padding - 108, 27);
-        Add(L"BUTTON", L"Browse", WS_TABSTOP, ScheduleFolder, 492, 101, 96, 29);
+        Add(L"BUTTON", L"Browse", WS_TABSTOP, ScheduleFolder, 492, 101, 96, 32);
         Add(L"STATIC", L"Schedule", 0, 0, Padding, 148, 190, 22);
         Add(L"STATIC", app.use24Hour ? L"Local time (24-hour)" : L"Local time (AM/PM)", 0, 0, 238, 148, 155, 22);
         Add(L"STATIC", L"Copies to keep", 0, 0, 417, 148, 140, 22);
@@ -1214,12 +1403,12 @@ struct ScheduleDialog {
             Copies, 417, 172, 100, 27);
         SetScheduleControls();
         Add(L"STATIC", L"Choose sources and exclusions under Rainmeter folders and files on the Backup screen.",
-            0, 0, Padding, 218, Width - 2 * Padding, 32);
+            0, 0, Padding, 218, Width - 2 * Padding, 48);
         if (!creating) {
-            Add(L"BUTTON", L"Remove scheme", WS_TABSTOP, RemoveTask, Padding, Footer, 140, 32);
+            Add(L"BUTTON", L"Remove scheme", WS_TABSTOP, RemoveTask, Padding, Footer, 140, 38);
         }
-        Add(L"BUTTON", L"Close", WS_TABSTOP, CloseDialog, SaveLeft - 96, Footer, 84, 32);
-        Add(L"BUTTON", L"Save scheme", BS_DEFPUSHBUTTON | WS_TABSTOP, SaveTask, SaveLeft, Footer, SaveWidth, 32);
+        Add(L"BUTTON", L"Close", WS_TABSTOP, CloseDialog, SaveLeft - 96, Footer, 84, 38);
+        Add(L"BUTTON", L"Save scheme", WS_TABSTOP, SaveTask, SaveLeft, Footer, SaveWidth, 38);
     }
 
     void SetScheduleControls() const {
@@ -1376,6 +1565,22 @@ struct ScheduleDialog {
             }
             SetBkMode(dc, TRANSPARENT);
             return reinterpret_cast<LRESULT>(self->app.palette.background);
+        }
+        case WM_CTLCOLOREDIT: {
+            auto dc = reinterpret_cast<HDC>(wp);
+            SetTextColor(dc, self->app.palette.text);
+            SetBkColor(dc, self->app.palette.panel);
+            return reinterpret_cast<LRESULT>(self->app.palette.surface);
+        }
+        case DM_GETDEFID:
+            return MAKELRESULT(self->showLog ? CloseDialog : SaveTask, DC_HASDEFID);
+        case WM_DRAWITEM: {
+            const auto& item = *reinterpret_cast<DRAWITEMSTRUCT*>(lp);
+            DrawButtonSurface(item, self->app.palette, self->app.Px(12),
+                item.CtlID == SaveTask || (self->showLog && item.CtlID == CloseDialog));
+            DrawButtonText(item, self->app.dialogFont);
+            DrawButtonFocus(item);
+            return TRUE;
         }
         case WM_ERASEBKGND: {
             RECT r{};
@@ -1783,23 +1988,17 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
             }
             if (row->CtlType != ODT_BUTTON) break;
             auto id = row->CtlID;
-            auto r = row->rcItem;
+            const auto& r = row->rcItem;
             auto& p = app->palette;
-            bool disabled = row->itemState & ODS_DISABLED;
-            bool primary = !disabled && (id == Run || (id == BackupPage && !app->restorePage) ||
-                (id == RestorePage && app->restorePage));
-            bool down = row->itemState & ODS_SELECTED;
-            auto fill = primary ? p.accent : down ? p.hover : disabled ? p.bg : p.panel;
-            FillRect(row->hDC, &r, p.background);
-            Box(row->hDC, r, app->Px(12), fill, primary ? p.accent : p.border);
-            SetBkMode(row->hDC, TRANSPARENT);
-            SetTextColor(row->hDC, primary ? p.onAccent : disabled ? p.quiet : p.text);
+            const bool primary = id == Run || (id == BackupPage && !app->restorePage) ||
+                (id == RestorePage && app->restorePage);
+            DrawButtonSurface(*row, p, app->Px(12), primary);
             if (id == MoreMenu) {
                 const int x = (r.left + r.right) / 2;
                 const int y = (r.top + r.bottom) / 2;
                 const int halfWidth = app->Px(8);
                 const int thickness = std::max(1, app->Px(2));
-                auto ink = CreateSolidBrush(disabled ? p.quiet : p.text);
+                auto ink = CreateSolidBrush(row->itemState & ODS_DISABLED ? p.quiet : p.text);
                 for (int offset : {-5, 0, 5}) {
                     const int top = y + app->Px(offset) - thickness / 2;
                     RECT line{x - halfWidth, top, x + halfWidth, top + thickness};
@@ -1807,15 +2006,9 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
                 }
                 DeleteObject(ink);
             } else {
-                auto text = Text(row->hwndItem);
-                auto previous = SelectObject(row->hDC, id == Run ? app->section : app->regular);
-                DrawTextW(row->hDC, text.c_str(), -1, &r, DT_SINGLELINE | DT_CENTER | DT_VCENTER | DT_HIDEPREFIX);
-                SelectObject(row->hDC, previous);
+                DrawButtonText(*row, id == Run ? app->section : app->regular);
             }
-            if ((row->itemState & ODS_FOCUS) && !(row->itemState & ODS_NOFOCUSRECT)) {
-                InflateRect(&r, -3, -3);
-                DrawFocusRect(row->hDC, &r);
-            }
+            DrawButtonFocus(*row);
             return TRUE;
         }
         case WM_NOTIFY: {
