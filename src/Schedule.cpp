@@ -476,7 +476,7 @@ fs::path SaveManagedBackup(const Tree& tree, const Schedule& schedule, const Tra
     do {
         if (transfer.stop.stop_requested()) throw Cancelled("Backup canceled.");
         wait = WaitForSingleObject(mutex, 250);
-        if (wait == WAIT_TIMEOUT && transfer.report) transfer.report(L"Waiting for another backup to finish…", 0);
+        if (wait == WAIT_TIMEOUT && transfer.report) transfer.report(L"Waiting for another backup to finish", 0);
     } while (wait == WAIT_TIMEOUT);
     if (wait != WAIT_OBJECT_0 && wait != WAIT_ABANDONED) Fail(L"Could not coordinate the scheduled backup.");
     lock.owned = true;

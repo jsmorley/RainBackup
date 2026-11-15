@@ -106,8 +106,7 @@ const wchar_t* ButtonTip(int id, bool restore) {
     case Remove: return L"Remove this source from future backups.";
     case ScheduleButton: return L"Edit this scheme's name, destination, and schedule.";
     case NewProfile: return L"Create a backup scheme with its own sources.";
-    case ShowLog: return L"View backup and restore results.";
-    case MoreMenu: return L"Open Settings, Help, Releases, and Support.";
+    case MoreMenu: return L"Open Log, Settings, Help, Releases, and Support.";
     case SelectAll: return L"Check all available folders and files.";
     case ClearAll: return L"Uncheck everything in the tree.";
     case SaveSelection: return L"Save the current file and folder selection for this scheme.";
@@ -506,12 +505,12 @@ struct App {
         title = Control(L"STATIC", L"RainBackup", SS_NOPREFIX);
         sub = Control(L"STATIC", L"Backup and restore your Rainmeter folders and files", SS_NOPREFIX);
         summary = Control(L"STATIC", L"", SS_NOPREFIX);
-        detail = Control(L"STATIC", L"", SS_PATHELLIPSIS | SS_NOPREFIX);
-        status = Control(L"STATIC", L"", SS_PATHELLIPSIS | SS_NOPREFIX);
+        detail = Control(L"STATIC", L"", SS_LEFTNOWORDWRAP | SS_NOPREFIX);
+        status = Control(L"STATIC", L"", SS_LEFTNOWORDWRAP | SS_NOPREFIX);
         progressBar = Control(PROGRESS_CLASSW, L"", PBS_SMOOTH);
         percentLabel = Control(L"STATIC", L"", SS_RIGHT | SS_NOPREFIX);
         SendMessageW(progressBar, PBM_SETRANGE32, 0, 100);
-        mode = Control(L"STATIC", L"", SS_NOPREFIX | SS_PATHELLIPSIS);
+        mode = Control(L"STATIC", L"", SS_NOPREFIX | SS_LEFTNOWORDWRAP);
         lastFolder = LoadBackupFolder();
         if (lastFolder.empty()) lastFolder = KnownFolder(FOLDERID_Documents);
         profiles = LoadBackupProfiles(lastFolder);
@@ -533,10 +532,10 @@ struct App {
         zipList = Control(WC_COMBOBOXW, L"", WS_TABSTOP | CBS_DROPDOWNLIST | WS_VSCROLL, ZipList);
         const std::pair<int, const wchar_t*> labels[] = {
             {BackupPage,L"&Backup"}, {RestorePage,L"&Restore"}, {ScanNow,L"Scan"},
-            {AddFolder,L"Add folder…"}, {AddFile,L"Add file…"}, {Change,L"Change path…"}, {Remove,L"Remove folder"},
-            {ShowLog,L"Log"}, {MoreMenu,L"More options"}, {SelectAll,L"Select all"}, {ClearAll,L"Clear selection"}, {Run,L"Back up now…"},
+            {AddFolder,L"Add folder"}, {AddFile,L"Add file"}, {Change,L"Change path"}, {Remove,L"Remove folder"},
+            {MoreMenu,L"More options"}, {SelectAll,L"Select all"}, {ClearAll,L"Clear selection"}, {Run,L"Back up now"},
             {Open,L"Open ZIP"}, {Original,L"Original location"},
-            {NewLocation,L"New location"}, {Details,L"Scan issues…"},
+            {NewLocation,L"New location"}, {Details,L"Scan issues"},
             {NewProfile,L"New"}, {ScheduleButton,L"Edit"}, {CancelTransfer,L"Cancel"}, {DeleteBackup,L"Delete ZIP"},
             {SaveSelection,L"Save"}
         };
@@ -565,7 +564,6 @@ struct App {
         auto button = [&](int id, int x, int y, int w, int h = 34) { place(buttons.at(id), x, y, w, h); };
         place(title, 108, 20, width - 280, 42);
         place(sub, 110, 64, width - 282, 24);
-        button(ShowLog, width - 160, 36, 80, 38);
         button(MoreMenu, width - 72, 36, 42, 38);
         button(BackupPage, 30, 101, 119, ProfileRowHeight);
         button(RestorePage, 157, 101, 119, ProfileRowHeight);
@@ -604,7 +602,7 @@ struct App {
             ListView_SetColumnWidth(destinations, 1, pathWidth / 2);
             ListView_SetColumnWidth(destinations, 2, pathWidth - pathWidth / 2);
         } else {
-            place(detail, 30, lower + 7, width - 195, 25);
+            place(detail, 30, lower + 7, width - (backup && !backup->warnings.empty() ? 195 : 60), 25);
             button(Details, width - 149, lower + 2, 119, 30);
         }
         InvalidateRect(window, nullptr, TRUE);
@@ -620,7 +618,7 @@ struct App {
     void Refresh() {
         if (!tree) return;
         const bool has = Active() && !Active()->root.children.empty();
-        for (auto id : {ScanNow, AddFolder, AddFile, Change, Remove, Details, NewProfile,
+        for (auto id : {ScanNow, AddFolder, AddFile, Change, Remove, NewProfile,
             ScheduleButton, SaveSelection}) {
             ShowWindow(buttons[id], restorePage ? SW_HIDE : SW_SHOW);
         }
@@ -633,6 +631,7 @@ struct App {
             ShowWindow(control, restorePage && !loadingZip ? SW_SHOW : SW_HIDE);
         }
         ShowWindow(detail, restorePage ? SW_HIDE : SW_SHOW);
+        ShowWindow(buttons[Details], !restorePage && backup && !backup->warnings.empty() ? SW_SHOW : SW_HIDE);
         ShowWindow(progressBar, transferring ? SW_SHOW : SW_HIDE);
         ShowWindow(percentLabel, transferring ? SW_SHOW : SW_HIDE);
         ShowWindow(buttons[CancelTransfer], transferring ? SW_SHOW : SW_HIDE);
@@ -662,7 +661,7 @@ struct App {
         EnableWindow(tree, !busy && !loadingZip);
         EnableWindow(destinations, !busy && !loadingZip);
         EnableWindow(zipList, !busy && !loadingZip && !zips.empty());
-        SetWindowTextW(buttons[Run], restorePage ? L"Restore selected…" : L"Back up now…");
+        SetWindowTextW(buttons[Run], restorePage ? L"Restore selected" : L"Back up now");
         SetButtonTip(tooltips, window, buttons[Run], ButtonTip(Run, restorePage), true);
         SetWindowTextW(summary, restorePage ? L"Archive contents" : L"Rainmeter folders and files");
         const std::wstring restoreMode = !opened.tree ? L"" :
@@ -886,7 +885,7 @@ struct App {
     }
 
     void ScanSources(bool initial = false) {
-        Start(L"Scanning Rainmeter…", [this, initial](const Progress& progress) {
+        Start(L"Scanning Rainmeter", [this, initial](const Progress& progress) {
             auto list = sources;
             auto found = initial ? std::vector<Source>{} : Scan();
             for (auto& entry : found) {
@@ -911,7 +910,7 @@ struct App {
     }
 
     void Rebuild(std::vector<Source> list) {
-        Start(L"Reading backup sources…", [this, list = std::move(list)](const Progress& progress) mutable {
+        Start(L"Reading backup sources", [this, list = std::move(list)](const Progress& progress) mutable {
             auto model = Build(std::move(list), progress);
             ApplyIgnored(*model, ignored);
             auto holder = std::make_shared<std::unique_ptr<Tree>>(std::move(model));
@@ -992,7 +991,7 @@ struct App {
 
     void LoadZip(fs::path path, bool allZips = false) {
         loadingZip = true;
-        Start(L"Reading ZIP contents…", [this, path = std::move(path), allZips](const Progress&) {
+        Start(L"Reading ZIP contents", [this, path = std::move(path), allZips](const Progress&) {
             auto zip = std::make_shared<OpenZip>(ReadZip(path));
             return [this, path, zip, allZips] {
                 opened = std::move(*zip);
@@ -1064,7 +1063,7 @@ struct App {
                 L" copies. Older excess copies will be deleted after the ZIP is saved." : L"") +
             (!backup->warnings.empty() ? L"\n\nSome source items were unavailable. See Scan issues for paths." : L"") +
             L"\n\nSelected online-only files may download from OneDrive.", profile.automatic)) return;
-        Start(L"Creating backup…", [this, profile](const Progress& progress, const Transfer& transfer, fs::path& location) {
+        Start(L"Creating backup", [this, profile](const Progress& progress, const Transfer& transfer, fs::path& location) {
             auto model = Build(profile.sources, progress, transfer.stop);
             ApplyIgnored(*model, profile.excluded);
             if (model->incomplete) Fail(L"Some backup sources could not be read. Rescan and review Scan issues.");
@@ -1104,7 +1103,7 @@ struct App {
         if (!Confirm(window, question, L"Backup ZIP\n" + currentZip.filename().wstring() +
             L"\n\nSelected folders will be created as needed. Rainmeter will close and restart if it is running."
             L"\n\nRestore destinations" + mapping, plan.overwrites != 0)) return;
-        Start(L"Preparing restore…", [this, plan = std::move(plan)](const Progress& progress, const Transfer& transfer) {
+        Start(L"Preparing restore", [this, plan = std::move(plan)](const Progress& progress, const Transfer& transfer) {
             RestoreWithRainmeterRestart(opened, plan, progress, transfer);
             return [this, count = plan.files] {
                 notice = L"Restore completed";
@@ -1163,7 +1162,7 @@ struct ScheduleDialog {
         Add(L"STATIC", L"Backup destination", 0, 0, Padding, 78, 360, 20);
         folder = Add(L"EDIT", schedule.folder.c_str(), WS_BORDER | ES_AUTOHSCROLL | WS_TABSTOP, 0,
             Padding, 102, Width - 2 * Padding - 108, 27);
-        Add(L"BUTTON", L"Browse…", WS_TABSTOP, ScheduleFolder, 492, 101, 96, 29);
+        Add(L"BUTTON", L"Browse", WS_TABSTOP, ScheduleFolder, 492, 101, 96, 29);
         Add(L"STATIC", L"Schedule", 0, 0, Padding, 148, 190, 22);
         Add(L"STATIC", app.use24Hour ? L"Local time (24-hour)" : L"Local time (AM/PM)", 0, 0, 238, 148, 155, 22);
         Add(L"STATIC", L"Copies to keep", 0, 0, 417, 148, 140, 22);
@@ -1179,7 +1178,7 @@ struct ScheduleDialog {
         Add(L"STATIC", L"Choose sources and exclusions under Rainmeter folders and files on the Backup screen.",
             0, 0, Padding, 218, Width - 2 * Padding, 32);
         if (!creating) {
-            Add(L"BUTTON", L"Remove scheme…", WS_TABSTOP, RemoveTask, Padding, Footer, 140, 32);
+            Add(L"BUTTON", L"Remove scheme", WS_TABSTOP, RemoveTask, Padding, Footer, 140, 32);
         }
         Add(L"BUTTON", L"Close", WS_TABSTOP, CloseDialog, SaveLeft - 96, Footer, 84, 32);
         Add(L"BUTTON", L"Save scheme", BS_DEFPUSHBUTTON | WS_TABSTOP, SaveTask, SaveLeft, Footer, SaveWidth, 32);
@@ -1417,7 +1416,7 @@ void App::EditProfile(bool create) {
 
 void App::Command(int id, int notification) {
     if (id == CancelTransfer && transferring && stopTransfer.request_stop()) {
-        SetWindowTextW(status, L"Canceling…");
+        SetWindowTextW(status, L"Canceling");
         EnableWindow(buttons[CancelTransfer], FALSE);
     }
     if (busy) return;
@@ -1553,6 +1552,7 @@ void App::Command(int id, int notification) {
         AppendMenuW(settings, MF_SEPARATOR, 0, nullptr);
         AppendMenuW(settings, MF_STRING | (use24Hour ? MF_UNCHECKED : MF_CHECKED), Time12Hour, L"12-hour time");
         AppendMenuW(settings, MF_STRING | (use24Hour ? MF_CHECKED : MF_UNCHECKED), Time24Hour, L"24-hour time");
+        AppendMenuW(menu, MF_STRING, ShowLog, L"&Log");
         AppendMenuW(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(settings), L"&Settings");
         AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
         AppendMenuW(menu, MF_STRING, Help, L"&Help");
@@ -1733,7 +1733,7 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
                     SetBkMode(row->hDC, TRANSPARENT);
                     SetTextColor(row->hDC, selected ? palette.onAccent : disabled ? palette.quiet : palette.text);
                     DrawTextW(row->hDC, name, -1, &bounds,
-                        DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS | DT_NOPREFIX);
+                        DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                     SelectObject(row->hDC, previous);
                 }
                 if ((row->itemState & ODS_FOCUS) && !(row->itemState & ODS_NOFOCUSRECT)) {

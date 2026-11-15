@@ -54,7 +54,7 @@ std::map<DWORD, Instance> Running() {
 
 void RainmeterSession::Stop(const Progress& progress) {
     auto instances = Running();
-    if (!instances.empty() && progress) progress(L"Closing Rainmeter…");
+    if (!instances.empty() && progress) progress(L"Closing Rainmeter");
     for (auto& [id, instance] : instances) {
         if (WaitForSingleObject(instance.process, 0) == WAIT_OBJECT_0) continue;
         if (!instance.window || !PostMessageW(instance.window, WM_CLOSE, 0, 0)) {

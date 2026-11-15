@@ -329,7 +329,7 @@ void PreserveOwner(const fs::path& target, const fs::path& temporary) {
 void WriteZip(const Tree& tree, const fs::path& path, const Transfer& transfer, ZipDisposition disposition,
     std::string_view comment) {
     TransferProgress progress(transfer);
-    progress.Begin(L"Measuring selected backup items…");
+    progress.Begin(L"Measuring selected backup items");
     CheckPath(path);
     std::vector<const Node*> roots;
     std::vector<Source> sources;
@@ -363,7 +363,7 @@ void WriteZip(const Tree& tree, const fs::path& path, const Transfer& transfer, 
         throw;
     }
     if (zipClose(zip, std::string(comment).c_str()) != ZIP_OK) Fail(L"Could not finish writing the ZIP.");
-    progress.Begin(L"Saving the finished ZIP…");
+    progress.Begin(L"Saving the finished ZIP");
     CheckPath(path);
     progress.Check();
     DWORD flags = MOVEFILE_WRITE_THROUGH;

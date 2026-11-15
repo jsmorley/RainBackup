@@ -21,12 +21,12 @@ RainBackup imports existing schedules as separate backups with copies of the pre
 CHOOSE WHAT TO BACK UP
 
 1. Open Backup and click Scan. RainBackup looks for the installed copy and any running portable copies it can identify. It reads Rainmeter's configured skins path and shows the skins separately from Settings & Plugins.
-2. For a portable copy that isn't running, click Add folder... and select the installation folder containing Rainmeter.exe, Rainmeter.dll, and Rainmeter.ini. RainBackup adds its skins, settings, and plugins. Repeat for each portable copy.
+2. For a portable copy that isn't running, click Add folder and select the installation folder containing Rainmeter.exe, Rainmeter.dll, and Rainmeter.ini. RainBackup adds its skins, settings, and plugins. Repeat for each portable copy.
 3. Expand the tree to see individual folders and files. Check or uncheck a folder to apply the choice to everything under it. A dash in a checkbox means only some of its contents are selected. Use Select all or Clear selection to change the entire tree.
-4. Use Add folder... or Add file... for anything else you want to include. For example, add C:\rainmeter-plugin-sdk if you want the SDK in the same archive.
-5. To replace a configured path, select the source and click Change path.... To take an entire source off the list, select its top-level folder or file and click Remove folder or Remove file. The Yes/No prompt shows exactly which path will be removed from future backups. Your files and existing ZIPs stay in place. To skip a nested folder or file, uncheck it in the tree.
+4. Use Add folder or Add file for anything else you want to include. For example, add C:\rainmeter-plugin-sdk if you want the SDK in the same archive.
+5. To replace a configured path, select the source and click Change path. To take an entire source off the list, select its top-level folder or file and click Remove folder or Remove file. The Yes/No prompt shows exactly which path will be removed from future backups. Your files and existing ZIPs stay in place. To skip a nested folder or file, uncheck it in the tree.
 
-RainBackup remembers your sources and checkbox choices. Review Scan issues... if the scan reports unavailable paths or skipped links. Use Scan before a manual backup if you've added or removed files since the tree was loaded.
+RainBackup remembers your sources and checkbox choices. Review Scan issues if the scan reports unavailable paths or skipped links. Use Scan before a manual backup if you've added or removed files since the tree was loaded.
 
 Selection changes save automatically. Click Save beside Clear selection to save the current selection again and confirm it in the status line.
 
@@ -45,18 +45,18 @@ $run.ExitCode
 CREATE A BACKUP ZIP
 
 1. Select a backup scheme. Use Edit to view or change its destination.
-2. Click Back up now... and review the confirmation. RainBackup names the ZIP using the scheme name and local time, for example RainBackup-Skins-2026-11-14-18-00-00.zip, and shows the full path when it finishes.
+2. Click Back up now and review the confirmation. RainBackup names the ZIP using the scheme name and local time, for example RainBackup-Skins-2026-11-14-18-00-00.zip, and shows the full path when it finishes.
 3. Watch the progress bar and current path. Click Cancel to discard the unfinished ZIP. If the operation is canceled or fails before the new archive is saved, any existing ZIP at that path stays in place.
 
 If the skins are in OneDrive, Windows may download selected online-only files as RainBackup reads them. If a file can't be read, check OneDrive's connection or use Always keep on this device in File Explorer, then try again.
 
 RESTORE A BACKUP
 
-1. Install Rainmeter on the destination PC before restoring. For a portable copy that RainBackup hasn't detected, use Backup > Add folder... and select its installation folder.
+1. Install Rainmeter on the destination PC before restoring. For a portable copy that RainBackup hasn't detected, use Backup > Add folder and select its installation folder.
 2. Select a backup scheme and open Restore. Choose one of its ZIPs from the dropdown. Open ZIP starts in the folder of the last ZIP you chose through that button. If that folder is unavailable or you haven't chosen a ZIP yet, the dialog opens at the RainBackup group of current scheme destinations when the group is available.
 3. Expand the archive tree and check the items to restore. Click Select all to restore the entire backup.
 4. Choose a destination. The list shows the backup type, original location, and restore destination for each source.
-5. Click Restore selected.... Review the destinations and the number of existing files that will be overwritten, then click Yes. RainBackup closes running Rainmeter instances before writing and reopens those instances afterward.
+5. Click Restore selected. Review the destinations and the number of existing files that will be overwritten, then click Yes. RainBackup closes running Rainmeter instances before writing and reopens those instances afterward.
 
 CHOOSE A RESTORE DESTINATION
 
@@ -75,11 +75,11 @@ SCHEDULE BACKUPS AND KEEP A SET NUMBER OF COPIES
 
 Windows Task Scheduler runs automatic backups under your signed-in account and catches up with one current backup after missed runs. Retention applies to both automatic and on-demand runs of that scheme. Manual-only schemes keep all copies.
 
-Switch to Manual only to stop automatic runs. In Edit, choose Remove scheme... to remove the scheme and its schedule. If matching ZIPs are found in its current destination, check Remove all .zip files as well to delete them permanently. The box starts unchecked. You can open any ZIPs you keep with Open ZIP.
+Switch to Manual only to stop automatic runs. In Edit, choose Remove scheme to remove the scheme and its schedule. If matching ZIPs are found in its current destination, check Remove all .zip files as well to delete them permanently. The box starts unchecked. You can open any ZIPs you keep with Open ZIP.
 
 VIEW OR EMPTY THE OPERATION LOG
 
-Click Log at the top of the main window to see manual backups, scheduled backups, and restores. Each entry shows when the operation ran and whether it succeeded, failed, or was canceled. Click Empty log and confirm to clear the history. Backup ZIPs and settings stay in place.
+Open More options > Log to see manual backups, scheduled backups, and restores. Each entry shows when the operation ran and whether it succeeded, failed, or was canceled. Click Empty log and confirm to clear the history. Backup ZIPs and settings stay in place.
 
 When RainBackup starts, the bottom-left status area shows the date and result of the last scheduled backup in the log.
 
