@@ -106,7 +106,7 @@ const wchar_t* ButtonTip(int id, bool restore) {
     case Remove: return L"Remove this source from future backups.";
     case ScheduleButton: return L"Edit this scheme's name, destination, and schedule.";
     case NewProfile: return L"Create a backup scheme with its own sources.";
-    case MoreMenu: return L"Open the log, settings, help, releases, and support menu.";
+    case MoreMenu: return L"Open the settings, log, help, releases, and support menu.";
     case SelectAll: return L"Check all available folders and files.";
     case ClearAll: return L"Uncheck everything in the tree.";
     case SaveSelection: return L"Save the current file and folder selection for this scheme.";
@@ -1552,8 +1552,8 @@ void App::Command(int id, int notification) {
         AppendMenuW(settings, MF_SEPARATOR, 0, nullptr);
         AppendMenuW(settings, MF_STRING | (use24Hour ? MF_UNCHECKED : MF_CHECKED), Time12Hour, L"12-hour time");
         AppendMenuW(settings, MF_STRING | (use24Hour ? MF_CHECKED : MF_UNCHECKED), Time24Hour, L"24-hour time");
-        AppendMenuW(menu, MF_STRING, ShowLog, L"Open &log");
         AppendMenuW(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(settings), L"&Settings");
+        AppendMenuW(menu, MF_STRING, ShowLog, L"Open &log");
         AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
         AppendMenuW(menu, MF_STRING, Help, L"&Help");
         AppendMenuW(menu, MF_STRING, Releases, L"&Releases");
