@@ -9,6 +9,6 @@ public:
 private:
     std::vector<fs::path> stopped_;
 };
-void RestoreWithRainmeterRestart(const OpenZip& archive, const RestorePlan& plan,
-    const Progress& progress = {}, const Transfer& transfer = {});
+RestoreResult RestoreWithRainmeterRestart(const OpenZip& archive, const RestorePlan& plan,
+    const Progress& progress = {}, const Transfer& transfer = {}, const ResolveConflict& resolve = {});
 }

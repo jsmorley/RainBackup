@@ -88,6 +88,31 @@ int main() {
         wchar_t value[2048]{};
         GetPrivateProfileStringW(L"Rainmeter", L"SkinPath", L"", value, 2048, (targets[1] / L"Rainmeter.ini").c_str());
         Require(EqualPath(value, targets[0]), "SkinPath was not updated for new Windows account");
+
+        Write(targets[0] / L"Clock" / L"Clock.ini", "existing skin");
+        Write(targets[2], "existing notes");
+        size_t prompts = 0;
+        auto skipped = Restore(zip, plan, {}, [&](const fs::path&) {
+            ++prompts;
+            return ConflictDecision{ConflictAction::Skip, true};
+        });
+        Require(skipped.skipped == 4 && !skipped.restored && prompts == 1, "skip-all did not cover every conflict");
+        Require(Read(targets[0] / L"Clock" / L"Clock.ini") == "existing skin" &&
+            Read(targets[2]) == "existing notes", "skip changed an existing file");
+        bool conflictCanceled = false;
+        try {
+            Restore(zip, plan, {}, [](const fs::path&) { return ConflictDecision{ConflictAction::Cancel}; });
+        } catch (const Cancelled&) { conflictCanceled = true; }
+        Require(conflictCanceled && Read(targets[0] / L"Clock" / L"Clock.ini") == "existing skin",
+            "cancel did not stop at the first conflict");
+        prompts = 0;
+        auto replaced = Restore(zip, plan, {}, [&](const fs::path&) {
+            ++prompts;
+            return ConflictDecision{ConflictAction::Replace, prompts == 2};
+        });
+        Require(replaced.restored == 4 && !replaced.skipped && prompts == 2, "replace once or replace-all failed");
+        Require(Read(targets[0] / L"Clock" / L"Clock.ini") == "clock" && Read(targets[2]) == "notes",
+            "replace did not restore the archived files");
         zip.tree->root.Select(false);
         auto& selection = zip.tree->root.children.front()->children.at(1);
         selection->children.front()->Select(true);

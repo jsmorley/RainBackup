@@ -20,6 +20,7 @@
 using namespace rb;
 namespace {
 constexpr UINT Finished = WM_APP + 1, ProgressUpdate = WM_APP + 2;
+constexpr UINT RestoreConflict = WM_APP + 3;
 constexpr int RainBackupIcon = 101;
 constexpr int HeaderLogoSize = 64;
 constexpr int ProfileRowHeight = 38;
@@ -179,6 +180,31 @@ bool Confirm(HWND window, const std::wstring& heading, const std::wstring& detai
 
 void Message(HWND window, const std::wstring& message, UINT icon = MB_ICONINFORMATION) {
     MessageBoxW(window, message.c_str(), L"RainBackup", MB_OK | icon);
+}
+
+ConflictDecision AskRestoreConflict(HWND window, const fs::path& path) {
+    constexpr int Skip = 100, Replace = 101;
+    constexpr TASKDIALOG_BUTTON buttons[] = {{Skip, L"Skip"}, {Replace, L"Replace"}};
+    TASKDIALOGCONFIG dialog{};
+    dialog.cbSize = sizeof(dialog);
+    dialog.hwndParent = window;
+    dialog.dwFlags = TDF_ALLOW_DIALOG_CANCELLATION | TDF_POSITION_RELATIVE_TO_WINDOW;
+    dialog.dwCommonButtons = TDCBF_CANCEL_BUTTON;
+    dialog.pszWindowTitle = L"RainBackup";
+    dialog.pszMainIcon = TD_WARNING_ICON;
+    dialog.pszMainInstruction = L"A file with this name already exists";
+    dialog.pszContent = path.c_str();
+    dialog.pszVerificationText = L"Do this for all future conflicts";
+    dialog.cButtons = static_cast<UINT>(std::size(buttons));
+    dialog.pButtons = buttons;
+    dialog.nDefaultButton = Skip;
+    dialog.cxWidth = 420;
+    int button = IDCANCEL;
+    BOOL applyToAll = FALSE;
+    if (FAILED(TaskDialogIndirect(&dialog, &button, nullptr, &applyToAll))) return {};
+    if (button == Skip) return {ConflictAction::Skip, applyToAll != FALSE};
+    if (button == Replace) return {ConflictAction::Replace, applyToAll != FALSE};
+    return {};
 }
 
 enum class Picker { Folder, Open };
@@ -1103,18 +1129,23 @@ struct App {
             if (mapping.size() > 780) { mapping += L"\nSee the destination list for the remaining locations."; break; }
             mapping += L"\n" + target.wstring();
         }
-        const auto question = plan.overwrites
-            ? L"Restore " + std::to_wstring(plan.files) + L" file(s) and overwrite " +
-                std::to_wstring(plan.overwrites) + L" existing file(s)?"
-            : L"Restore " + std::to_wstring(plan.files) + L" file(s)?";
+        const auto question = L"Restore " + std::to_wstring(plan.files) + L" file(s)?";
+        const auto conflicts = plan.overwrites ? L"\n\n" + std::to_wstring(plan.overwrites) +
+            L" destination file(s) already exist. You can choose how to handle conflicts during restore." : L"";
         if (!Confirm(window, question, L"Backup ZIP\n" + currentZip.filename().wstring() +
             L"\n\nSelected folders will be created as needed. Rainmeter will close and restart if it is running."
-            L"\n\nRestore destinations" + mapping, plan.overwrites != 0)) return;
+            L"\n\nRestore destinations" + mapping + conflicts)) return;
         Start(L"Preparing restore", [this, plan = std::move(plan)](const Progress& progress, const Transfer& transfer) {
-            RestoreWithRainmeterRestart(opened, plan, progress, transfer);
-            return [this, count = plan.files] {
+            const auto result = RestoreWithRainmeterRestart(opened, plan, progress, transfer, [this](const fs::path& path) {
+                ConflictDecision decision;
+                SendMessageW(window, RestoreConflict, reinterpret_cast<WPARAM>(&decision), reinterpret_cast<LPARAM>(&path));
+                return decision;
+            });
+            return [this, result] {
                 notice = L"Restore completed";
-                Message(window, std::to_wstring(count) + L" file(s) restored.");
+                auto summary = std::to_wstring(result.restored) + L" file(s) restored.";
+                if (result.skipped) summary += L"\n" + std::to_wstring(result.skipped) + L" file(s) skipped.";
+                Message(window, summary);
             };
         }, L"Restore", currentZip);
     }
@@ -1835,6 +1866,11 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
         }
         case WM_COMMAND:
             app->Command(LOWORD(wp), HIWORD(wp));
+            return 0;
+        case RestoreConflict:
+            if (app->busy && !app->stopTransfer.stop_requested()) {
+                *reinterpret_cast<ConflictDecision*>(wp) = AskRestoreConflict(window, *reinterpret_cast<const fs::path*>(lp));
+            }
             return 0;
         case ProgressUpdate: {
             std::unique_ptr<ProgressMessage> progress(reinterpret_cast<ProgressMessage*>(lp));

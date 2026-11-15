@@ -533,9 +533,25 @@ RestorePlan PlanRestore(const OpenZip& zip, const std::vector<fs::path>& destina
     return plan;
 }
 
-void Restore(const OpenZip& zip, const RestorePlan& plan, const Transfer& transfer) {
+RestoreResult Restore(const OpenZip& zip, const RestorePlan& plan, const Transfer& transfer,
+    const ResolveConflict& resolve) {
     TransferProgress progress(transfer);
-    size_t restored = 0;
+    RestoreResult result;
+    std::optional<ConflictAction> futureAction;
+    auto skipConflict = [&](const fs::path& path) {
+        if (!resolve) return false;
+        auto action = futureAction.value_or(ConflictAction::Cancel);
+        if (!futureAction) {
+            const auto decision = resolve(path);
+            action = decision.action;
+            if (decision.applyToAll) futureAction = action;
+        }
+        if (action == ConflictAction::Cancel) throw Cancelled("Restore canceled at an overwrite conflict.");
+        progress.Check();
+        if (action != ConflictAction::Skip) return false;
+        ++result.skipped;
+        return true;
+    };
     try {
         if (transfer.report) {
             for (const auto& item : plan.items) {
@@ -553,6 +569,13 @@ void Restore(const OpenZip& zip, const RestorePlan& plan, const Transfer& transf
                 progress.Advance(EntryWork);
                 continue;
             }
+            const auto existing = GetFileAttributesW(item.target.c_str());
+            const bool approvedReplacement = existing != INVALID_FILE_ATTRIBUTES &&
+                !(existing & FILE_ATTRIBUTE_DIRECTORY);
+            if (approvedReplacement && skipConflict(item.target)) {
+                progress.Advance(EntryWork + zip.archive->entries.at(item.entry - 1).info.uncompressed_size);
+                continue;
+            }
             fs::create_directories(item.target.parent_path());
             TemporaryFile temporary(item.target.parent_path());
             std::ofstream output(temporary.path, std::ios::binary | std::ios::trunc);
@@ -567,23 +590,35 @@ void Restore(const OpenZip& zip, const RestorePlan& plan, const Transfer& transf
             CheckPath(item.target);
             progress.Check();
             auto attributes = GetFileAttributesW(item.target.c_str());
-            if (attributes == INVALID_FILE_ATTRIBUTES) {
-                if (!MoveFileExW(temporary.path.c_str(), item.target.c_str(), MOVEFILE_WRITE_THROUGH)) {
-                    FileError(L"Could not create the restored file.", item.target, GetLastError());
+            if (attributes == INVALID_FILE_ATTRIBUTES &&
+                !MoveFileExW(temporary.path.c_str(), item.target.c_str(), MOVEFILE_WRITE_THROUGH)) {
+                const auto error = GetLastError();
+                attributes = GetFileAttributesW(item.target.c_str());
+                if ((error != ERROR_ALREADY_EXISTS && error != ERROR_FILE_EXISTS) ||
+                    attributes == INVALID_FILE_ATTRIBUTES) {
+                    FileError(L"Could not create the restored file.", item.target, error);
                 }
-            } else {
+            }
+            if (attributes != INVALID_FILE_ATTRIBUTES) {
+                if (attributes & FILE_ATTRIBUTE_DIRECTORY) Fail(L"A folder blocks the restored file " + item.target.wstring());
+                if (!approvedReplacement && skipConflict(item.target)) {
+                    progress.Advance(EntryWork);
+                    continue;
+                }
+                CheckPath(item.target);
                 PreserveOwner(item.target, temporary.path);
                 if (!ReplaceFileW(item.target.c_str(), temporary.path.c_str(), nullptr, 0, nullptr, nullptr)) {
                     FileError(L"Could not replace the existing file while preserving its access controls.", item.target, GetLastError());
                 }
             }
-            ++restored;
+            ++result.restored;
             progress.Advance(EntryWork);
         }
     } catch (const Cancelled&) {
-        throw Cancelled("Restore canceled. " + std::to_string(restored) + " file(s) had already been restored.");
+        throw Cancelled("Restore canceled. " + std::to_string(result.restored) + " file(s) had already been restored.");
     } catch (const std::exception& error) {
-        Fail(std::to_wstring(restored) + L" file(s) restored before stopping.\n\n" + Utf16(error.what()));
+        Fail(std::to_wstring(result.restored) + L" file(s) restored before stopping.\n\n" + Utf16(error.what()));
     }
+    return result;
 }
 }

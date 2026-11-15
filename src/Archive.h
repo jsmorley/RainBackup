@@ -34,5 +34,16 @@ struct RestorePlan {
     size_t overwrites = 0;
 };
 RestorePlan PlanRestore(const OpenZip& zip, const std::vector<fs::path>& destinations, bool relocate);
-void Restore(const OpenZip& zip, const RestorePlan& plan, const Transfer& transfer = {});
+enum class ConflictAction { Cancel, Skip, Replace };
+struct ConflictDecision {
+    ConflictAction action = ConflictAction::Cancel;
+    bool applyToAll = false;
+};
+using ResolveConflict = std::function<ConflictDecision(const fs::path&)>;
+struct RestoreResult {
+    size_t restored = 0;
+    size_t skipped = 0;
+};
+RestoreResult Restore(const OpenZip& zip, const RestorePlan& plan, const Transfer& transfer = {},
+    const ResolveConflict& resolve = {});
 }
