@@ -25,6 +25,33 @@ constexpr UINT RestoreConflict = WM_APP + 3;
 constexpr int RainBackupIcon = 101;
 constexpr int HeaderLogoSize = 64;
 constexpr int ProfileRowHeight = 38;
+
+LRESULT CALLBACK BackupTreeProc(HWND tree, UINT message, WPARAM wp, LPARAM lp, UINT_PTR, DWORD_PTR) {
+    if (message == WM_DROPFILES) return SendMessageW(GetParent(tree), message, wp, lp);
+    if (message == WM_NCDESTROY) RemoveWindowSubclass(tree, BackupTreeProc, 0);
+    return DefSubclassProc(tree, message, wp, lp);
+}
+
+enum class AddedSource { None, Ordinary, Portable };
+
+AddedSource AddSource(std::vector<Source>& sources, const fs::path& path,
+    const std::wstring& setup, bool directory, bool skipListedPath = false) {
+    auto portable = directory ? PortableSources(path) : std::vector<Source>{};
+    if (portable.empty()) {
+        if (skipListedPath && std::any_of(sources.begin(), sources.end(),
+            [&](const Source& source) { return EqualPath(source.path, path); })) return AddedSource::None;
+        return Merge(sources, {setup, Kind::Extra, path}) ? AddedSource::Ordinary : AddedSource::None;
+    }
+    bool added = false;
+    for (auto& entry : portable) {
+        const bool configured = std::any_of(sources.begin(), sources.end(), [&](const Source& source) {
+            return source.setup == entry.setup && source.kind == entry.kind;
+        });
+        if (!configured && Merge(sources, std::move(entry))) added = true;
+    }
+    return added ? AddedSource::Portable : AddedSource::None;
+}
+
 enum Id {
     BackupPage = 100, RestorePage, ScanNow, AddFolder, AddFile, Change, Remove, ScheduleButton,
     SelectAll, ClearAll, Run, Open, Original, NewLocation, Details, ZipList, TreeId, Destinations,
@@ -728,6 +755,7 @@ struct App {
         RefreshProfiles();
         tree = Control(WC_TREEVIEWW, L"", WS_TABSTOP | TVS_HASBUTTONS | TVS_HASLINES | TVS_LINESATROOT |
             TVS_SHOWSELALWAYS | TVS_DISABLEDRAGDROP | TVS_INFOTIP, TreeId);
+        if (!SetWindowSubclass(tree, BackupTreeProc, 0, 0)) Fail(L"Could not initialize dropped backup sources.");
         TreeView_SetExtendedStyle(tree, TVS_EX_DOUBLEBUFFER, TVS_EX_DOUBLEBUFFER);
         destinations = Control(WC_LISTVIEWW, L"", LVS_REPORT, Destinations);
         ListView_SetExtendedListViewStyle(destinations, LVS_EX_DOUBLEBUFFER | LVS_EX_INFOTIP);
@@ -848,6 +876,7 @@ struct App {
         ShowWindow(buttons[CancelTransfer], transferring ? SW_SHOW : SW_HIDE);
         ShowWindow(buttons[Run], transferring ? SW_HIDE : SW_SHOW);
         const bool hasProfile = !profiles.empty();
+        DragAcceptFiles(tree, !restorePage && !busy && !loadingZip && hasProfile);
         EnableWindow(profileChoice, !busy && !loadingZip && hasProfile);
         auto selectedSource = SelectedSource();
         SetWindowTextW(buttons[Remove], selectedSource && !selectedSource->directory ? L"Remove file" : L"Remove folder");
@@ -1132,6 +1161,55 @@ struct App {
         });
     }
 
+    void AddDroppedSources(HDROP drop) {
+        struct DropHandle {
+            HDROP handle;
+            ~DropHandle() { DragFinish(handle); }
+        } release{drop};
+        if (busy || loadingZip || restorePage || profiles.empty() || !IsWindowEnabled(window)) return;
+
+        auto list = sources;
+        std::wstring preview;
+        size_t added = 0, skipped = 0;
+        constexpr size_t previewLimit = 8;
+        const UINT count = DragQueryFileW(drop, UINT_MAX, nullptr, 0);
+        for (UINT i = 0; i < count; ++i) {
+            const UINT length = DragQueryFileW(drop, i, nullptr, 0);
+            std::wstring pathText(length + 1, L'\0');
+            if (!length || DragQueryFileW(drop, i, pathText.data(), length + 1) != length) {
+                ++skipped;
+                continue;
+            }
+            pathText.resize(length);
+            const fs::path path(pathText);
+            try {
+                CheckPath(path);
+            } catch (const std::exception&) {
+                ++skipped;
+                continue;
+            }
+            const DWORD attributes = GetFileAttributesW(path.c_str());
+            if (attributes == INVALID_FILE_ATTRIBUTES ||
+                AddSource(list, path, L"Additional sources", (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0,
+                    true) == AddedSource::None) {
+                ++skipped;
+                continue;
+            }
+            ++added;
+            if (added <= previewLimit) preview += L"\n" + pathText;
+        }
+        if (!added) {
+            Message(window, L"No backup sources were added. The dropped items were already listed or could not be read.");
+            return;
+        }
+        if (added > previewLimit) preview += L"\nAnd " + std::to_wstring(added - previewLimit) + L" more";
+        if (skipped) preview += L"\n\nSkipped " + std::to_wstring(skipped) + L" duplicate or unavailable item(s).";
+        const auto& name = profiles.at(activeProfile).name;
+        if (Confirm(window, L"Add dropped items to this backup scheme?", name + L"\n" + preview)) {
+            Rebuild(std::move(list));
+        }
+    }
+
     void RefreshProfiles() {
         SendMessageW(profileChoice, CB_RESETCONTENT, 0, 0);
         if (profiles.empty()) {
@@ -1225,7 +1303,8 @@ struct App {
 
     void DeleteZip() {
         auto row = SendMessageW(zipList, CB_GETCURSEL, 0, 0);
-        auto path = row == CB_ERR ? Browse(window, Picker::Open, lastFolder, true, BackupPlaces()) : zips.at(row);
+        const auto& folder = profiles.empty() ? lastFolder : profiles.at(activeProfile).schedule.folder;
+        auto path = row == CB_ERR ? Browse(window, Picker::Open, folder, true, BackupPlaces()) : zips.at(row);
         if (path.empty()) return;
         CheckPath(path);
         if (!EqualPath(path.extension(), L".zip") || !fs::is_regular_file(path)) {
@@ -1677,24 +1756,14 @@ void App::Command(int id, int notification) {
         auto path = Browse(window, id == AddFile ? Picker::Open : Picker::Folder);
         if (path.empty()) break;
         auto list = sources;
-        auto portable = id == AddFolder ? PortableSources(path) : std::vector<Source>{};
-        if (!portable.empty()) {
-            bool added = false;
-            for (auto& entry : portable) {
-                const bool configured = std::any_of(list.begin(), list.end(), [&](const Source& source) {
-                    return source.setup == entry.setup && source.kind == entry.kind;
-                });
-                if (!configured && Merge(list, std::move(entry))) added = true;
-            }
-            if (!added) Fail(L"This portable Rainmeter installation is already in the list.");
-            if (Confirm(window, L"Add this portable Rainmeter installation?", path.wstring())) Rebuild(std::move(list));
-            break;
-        }
         auto item = Selected();
         auto setup = item ? (item->parent == &backup->root ? item->name : backup->sources.at(item->source).setup)
             : L"Additional sources";
-        if (!Merge(list, {setup, Kind::Extra, path})) Fail(L"This source is already in the list.");
-        if (Confirm(window, L"Add this backup source?", setup + L"\n" + path.wstring())) Rebuild(std::move(list));
+        const auto added = AddSource(list, path, setup, id == AddFolder);
+        if (added == AddedSource::None) Fail(L"This source is already in the list.");
+        const bool portable = added == AddedSource::Portable;
+        if (Confirm(window, portable ? L"Add this portable Rainmeter installation?" : L"Add this backup source?",
+            portable ? path.wstring() : setup + L"\n" + path.wstring())) Rebuild(std::move(list));
         break;
     }
     case Change:
@@ -2126,6 +2195,7 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
                 DestroyWindow(window);
             }
             return 0;
+        case WM_DROPFILES: app->AddDroppedSources(reinterpret_cast<HDROP>(wp)); return 0;
         case WM_DESTROY: PostQuitMessage(0); return 0;
         }
     } catch (const std::exception& error) {

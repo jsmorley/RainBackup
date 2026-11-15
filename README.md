@@ -13,7 +13,7 @@ Download the installer ZIP from [GitHub Releases](https://github.com/jsmorley/Ra
 ## Restore
 
 - The Restore dropdown lists ZIPs for the selected backup scheme. **Open ZIP** can browse for other archives. Check individual items or click **Select all**.
-- **Delete ZIP** permanently deletes the selected ZIP after showing its full path and asking for confirmation. With no ZIP selected, it opens a file picker.
+- **Delete ZIP** permanently deletes the selected ZIP after showing its full path and asking for confirmation. With no ZIP selected, the picker starts in the selected scheme’s destination when it is available.
 - **Original location** uses the paths stored in the archive. **New location** puts the selected files under one folder you choose. Review the resulting paths before restoring.
 - Verify the preview. RainBackup requires an installed or detected portable Rainmeter. It closes running Rainmeter instances before writing and relaunches them afterward. A relocated restore updates the restored Rainmeter.ini when both settings and skins are mapped. New files inherit destination permissions, and replacement uses Windows’ access-control preservation. Restores apply file by file. A failure reports how many files were restored before it stopped.
 

@@ -23,7 +23,7 @@ CHOOSE WHAT TO BACK UP
 1. Open Backup and click Scan. RainBackup looks for the installed copy and any running portable copies it can identify. It reads Rainmeter's configured skins path and shows the skins separately from Settings & Plugins.
 2. For a portable copy that isn't running, click Add folder and select the installation folder containing Rainmeter.exe, Rainmeter.dll, and Rainmeter.ini. RainBackup adds its skins, settings, and plugins. Repeat for each portable copy.
 3. Expand the tree to see individual folders and files. Check or uncheck a folder to apply the choice to everything under it. A dash in a checkbox means only some of its contents are selected. Use Select all or Clear selection to change the entire tree.
-4. Use Add folder or Add file for anything else you want to include. For example, add C:\rainmeter-plugin-sdk if you want the SDK in the same archive.
+4. Use Add folder or Add file for anything else you want to include. For example, add C:\rainmeter-plugin-sdk if you want the SDK in the same archive. You can also drop multiple files and folders from Windows Explorer onto the Backup tree and confirm them together.
 5. To replace a configured path, select the source and click Change path. To take an entire source off the list, select its top-level folder or file and click Remove folder or Remove file. The Yes/No prompt shows exactly which path will be removed from future backups. Your files and existing ZIPs stay in place. To skip a nested folder or file, uncheck it in the tree.
 
 RainBackup remembers your sources and checkbox choices. Review Scan issues if the scan reports unavailable paths or skipped links. Use Scan before a manual backup if you've added or removed files since the tree was loaded.
@@ -93,4 +93,4 @@ Choose 12-hour time or 24-hour time under More options > Settings. This applies 
 
 DELETE AN OLD BACKUP
 
-On Restore, select a ZIP in the dropdown and click Delete ZIP. If no ZIP is selected, the button opens a file picker. Verify the full path in the Yes/No prompt. Clicking Yes permanently deletes that ZIP.
+On Restore, select a ZIP in the dropdown and click Delete ZIP. If no ZIP is selected, the picker starts in the selected scheme's destination when it is available. Verify the full path in the Yes/No prompt. Clicking Yes permanently deletes that ZIP.
