@@ -1230,7 +1230,9 @@ struct App {
         ShowProfileArchives();
         Populate();
         if (!profile) return;
-        if (startup) ScanSources(true);
+        if (restorePage) {
+            if (!zips.empty()) LoadZip(zips.front());
+        } else if (startup) ScanSources(true);
         else Rebuild(sources);
     }
 
@@ -1747,6 +1749,8 @@ void App::Command(int id, int notification) {
         if (restorePage && currentZip.empty()) ShowProfileArchives();
         notice.clear();
         Populate();
+        if (restorePage && currentZip.empty() && !zips.empty()) LoadZip(zips.front());
+        else if (!restorePage && !backup && !profiles.empty()) Rebuild(sources);
         break;
     case ScanNow:
         ScanSources();

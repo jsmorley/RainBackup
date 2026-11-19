@@ -54,7 +54,7 @@ If the skins are in OneDrive, Windows may download selected online-only files as
 ## Restore a backup
 
 1. Install Rainmeter on the destination PC before restoring. For a portable copy that RainBackup hasn’t detected, use **Backup** → **Add folder** and select its installation folder.
-2. Select a backup scheme and open **Restore**. Choose one of its ZIPs from the dropdown. **Open ZIP** starts in the folder of the last ZIP you chose through that button. If that folder is unavailable or you haven't chosen a ZIP yet, the dialog opens at the **RainBackup** group of current scheme destinations when the group is available.
+2. Select a backup scheme and open **Restore**. The newest backup is selected and loaded automatically when available. Choose an older backup from the dropdown. **Open ZIP** starts in the folder of the last ZIP you chose through that button. If that folder is unavailable or you haven't chosen a ZIP yet, the dialog opens at the **RainBackup** group of current scheme destinations when the group is available.
 3. Expand the archive tree and check the items to restore. Click **Select all** to restore the entire backup.
 4. Choose a destination. The list shows the backup type, original location, and restore destination for each source.
 5. Click **Restore selected**. Review the destinations and the number of existing files, then click **Yes**. At a file conflict, choose **Skip**, **Replace**, or **Cancel**. Check **Do this for all future conflicts** to apply Skip or Replace for the rest of this restore. Cancel stops the restore. Files already restored stay in place. RainBackup closes running Rainmeter instances before writing and reopens them afterward.
